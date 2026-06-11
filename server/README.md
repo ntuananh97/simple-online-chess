@@ -88,7 +88,7 @@ Request → Routes → Controller → Model  (imports types from src/types/)
 | `npm run build` | Compile TypeScript to `dist/` |
 | `npm start` | Run compiled output |
 
-Default port: `3000` (override with `PORT` environment variable).
+Default port: `5000` (override with `PORT` environment variable). The Next.js client uses port `3000` by default.
 
 ## Database (Prisma + Neon PostgreSQL)
 

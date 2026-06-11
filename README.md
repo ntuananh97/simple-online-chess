@@ -32,6 +32,35 @@ simple-online-chess/
 
 The frontend runs on the default Next.js dev port (`http://localhost:3000` unless configured otherwise).
 
+#### API client (fetch)
+
+The client talks to the Express backend via a small fetch wrapper in `client/src/lib/api/`.
+
+| File | Role |
+|------|------|
+| `src/lib/api/config.ts` | Base URL from `NEXT_PUBLIC_API_URL` |
+| `src/lib/api/fetch.ts` | Shared `apiFetch()` helper and `ApiError` |
+| `src/lib/api/<feature>.api.ts` | One module per API resource (e.g. `health.api.ts`) |
+| `src/types/<feature>.types.ts` | Response and request TypeScript types |
+
+Copy the example env file and point it at the backend (default port `5000`):
+
+```bash
+cd client
+cp .env.example .env.local
+```
+
+Example — call the health endpoint:
+
+```ts
+import { healthApi } from "@/lib/api";
+
+const health = await healthApi.getHealth();
+// { message: "Simple Online Chess API", database: "connected" }
+```
+
+When adding a new endpoint, create matching types and an `*.api.ts` module that uses `apiFetch`.
+
 ### Backend (`server/`)
 
 | Technology | Purpose |
@@ -43,7 +72,7 @@ The frontend runs on the default Next.js dev port (`http://localhost:3000` unles
 | [TypeScript](https://www.typescriptlang.org/) | Type-safe JavaScript |
 | [tsx](https://github.com/privatenumber/tsx) | Dev server with watch mode |
 
-The API server listens on port `3000` by default (override with the `PORT` environment variable).
+The API server listens on port `5000` by default (override with the `PORT` environment variable). Run the Next.js client on port `3000` so both apps can run side by side in development.
 
 #### MVC architecture
 
@@ -83,6 +112,7 @@ Install dependencies and run each app from its directory.
 ```bash
 cd client
 npm install
+cp .env.example .env.local   # NEXT_PUBLIC_API_URL → backend (default http://localhost:5000)
 npm run dev
 ```
 

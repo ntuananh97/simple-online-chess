@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Client
+
+Next.js frontend for Simple Online Chess.
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm install
+cp .env.example .env.local
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). Start the backend separately (see [server/README.md](../server/README.md)).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable | Description |
+|----------|-------------|
+| `NEXT_PUBLIC_API_URL` | Express API base URL (default `http://localhost:5000`) |
 
-## Learn More
+## API layer
 
-To learn more about Next.js, take a look at the following resources:
+HTTP calls use native `fetch` through a shared helper in `src/lib/api/`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+src/lib/api/
+├── config.ts       # API_BASE_URL
+├── fetch.ts        # apiFetch(), ApiError
+├── health.api.ts   # sample: GET /
+└── index.ts        # public exports
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Sample: health check
 
-## Deploy on Vercel
+```ts
+import { healthApi } from "@/lib/api";
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+const health = await healthApi.getHealth();
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Adding a new API module
+
+1. Add types in `src/types/<feature>.types.ts`
+2. Create `src/lib/api/<feature>.api.ts` using `apiFetch`
+3. Export from `src/lib/api/index.ts`
+
+```ts
+// src/lib/api/room.api.ts
+import { apiFetch } from "./fetch";
+
+export const roomApi = {
+  create: (whiteId: string) =>
+    apiFetch("/rooms", { method: "POST", body: { whiteId } }),
+};
+```
