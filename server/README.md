@@ -4,14 +4,24 @@ Express API for Simple Online Chess. The backend follows **MVC architecture**.
 
 ## MVC Architecture
 
-Each endpoint is split across four layers. When adding a new endpoint, create **all** of the following files for that feature.
+Each endpoint is split across five layers. When adding a new endpoint, create **all** of the following files for that feature.
 
 | Layer | Folder | Responsibility |
 |-------|--------|----------------|
-| **Model** | `src/models/` | Data structures, business rules, and data access |
+| **Types** | `src/types/` | Shared TypeScript types and interfaces (request bodies, domain data, API shapes) |
+| **Model** | `src/models/` | Business rules and data access |
 | **View** | `src/views/` | Response formatting (JSON shape sent to the client) |
 | **Controller** | `src/controllers/` | HTTP handling — reads the request, calls the model, uses the view, sends the response |
 | **Routes** | `src/routes/` | URL paths and HTTP methods, wired to controller handlers |
+
+### Types convention
+
+Keep types in **dedicated files** under `src/types/` — do not define `interface` / `type` inline in models, controllers, or views unless they are private helpers used only in that single file.
+
+- **One file per feature**: `src/types/<feature>.types.ts` (e.g. `room.types.ts`, `game.types.ts`)
+- **Export from the types file**; import elsewhere with `import type { ... } from "../types/<feature>.types"`
+- **Group related types** in the same file: domain entities (`RoomData`), request bodies (`CreateRoomBody`), and other shared shapes for that feature
+- **Prisma enums** (e.g. `RoomStatus`) stay in the generated client; re-export or reference them from types files when needed
 
 ### Directory layout
 
@@ -19,34 +29,43 @@ Each endpoint is split across four layers. When adding a new endpoint, create **
 server/src/
 ├── index.ts              # Entry point — starts the server
 ├── app.ts                # Express app setup (middleware, route mounting)
+├── types/
+│   └── room.types.ts     # add <feature>.types.ts per endpoint (e.g. health.types.ts)
 ├── models/
-│   └── health.model.ts
+│   ├── health.model.ts
+│   └── room.model.ts
 ├── views/
-│   └── health.view.ts
+│   ├── health.view.ts
+│   └── room.view.ts
 ├── controllers/
-│   └── health.controller.ts
+│   ├── health.controller.ts
+│   └── room.controller.ts
 └── routes/
     ├── index.ts          # Combines and mounts all route modules
-    └── health.routes.ts
+    ├── health.routes.ts
+    └── room.routes.ts
 ```
 
 ### Adding a new endpoint
 
 Example: `GET /games/:id`
 
-1. **Model** — `src/models/game.model.ts`  
-   Define types and functions that load or compute game data.
+1. **Types** — `src/types/game.types.ts`  
+   Define interfaces for domain data (`GameData`), request bodies, and any shared shapes used across layers.
 
-2. **View** — `src/views/game.view.ts`  
+2. **Model** — `src/models/game.model.ts`  
+   Import types from `src/types/game.types.ts`. Implement functions that load or compute game data.
+
+3. **View** — `src/views/game.view.ts`  
    Export formatters that turn model data into the API response shape.
 
-3. **Controller** — `src/controllers/game.controller.ts`  
+4. **Controller** — `src/controllers/game.controller.ts`  
    Export handler(s) that call the model, pass results through the view, and `res.json(...)`.
 
-4. **Routes** — `src/routes/game.routes.ts`  
+5. **Routes** — `src/routes/game.routes.ts`  
    Define paths and bind them to controller handlers.
 
-5. **Register routes** — import and mount in `src/routes/index.ts`:
+6. **Register routes** — import and mount in `src/routes/index.ts`:
 
    ```ts
    import gameRoutes from "./game.routes";
@@ -56,7 +75,7 @@ Example: `GET /games/:id`
 ### Flow
 
 ```
-Request → Routes → Controller → Model
+Request → Routes → Controller → Model  (imports types from src/types/)
                       ↓
                     View → Response
 ```
