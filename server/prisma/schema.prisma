@@ -6,3 +6,35 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// Enum quản lý vòng đời của một phòng chơi
+enum RoomStatus {
+  WAITING    // Phòng vừa tạo, có 1 người, đang chờ người thứ 2
+  PLAYING    // Đã đủ 2 người, ván cờ đang diễn ra
+  COMPLETED  // Ván cờ đã kết thúc (Chiếu hết, hòa, đầu hàng...)
+  ABANDONED  // Bị hủy do có người thoát giữa chừng (Client disconnect)
+}
+
+// Model duy nhất cần thiết cho dự án Simple Chess
+model Room {
+  id        String     @id @default(uuid()) // Primary key
+  
+  // Mã phòng gồm 6 chữ số để user "Nhập số phòng -> Join" cho dễ
+  roomCode  String     @unique 
+  
+  status    RoomStatus @default(WAITING)
+
+  // Lưu trạng thái ván cờ hiện tại. 
+  // Chuỗi FEN mặc định bên dưới là vị trí khởi đầu chuẩn của cờ vua.
+  fen       String     @default("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+
+  // Lưu Client ID (UUID tạo ở local storage) để phân biệt ai là Đen, ai là Trắng
+  // và cho phép họ reconnect (F5 trang) mà không bị mất quyền điều khiển
+  whiteId   String?
+  blackId   String?
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([roomCode]) // Đánh index để tối ưu tốc độ khi user tìm kiếm phòng để Join
+}
