@@ -28,6 +28,9 @@ simple-online-chess/
 | [React](https://react.dev/) 19 | UI library |
 | [TypeScript](https://www.typescriptlang.org/) | Type-safe JavaScript |
 | [Tailwind CSS](https://tailwindcss.com/) 4 | Utility-first styling |
+| [shadcn/ui](https://ui.shadcn.com/) | Accessible UI components (Radix Nova style) |
+| [Radix UI](https://www.radix-ui.com/) | Headless primitives for shadcn components |
+| [Lucide React](https://lucide.dev/) | Icon library |
 | [ESLint](https://eslint.org/) | Linting (Next.js config) |
 
 The frontend runs on the default Next.js dev port (`http://localhost:3000` unless configured otherwise).
@@ -60,6 +63,31 @@ const health = await healthApi.getHealth();
 ```
 
 When adding a new endpoint, create matching types and an `*.api.ts` module that uses `apiFetch`.
+
+#### UI components (shadcn/ui)
+
+The client uses [shadcn/ui](https://ui.shadcn.com/) for reusable, accessible components. Configuration lives in `client/components.json` (style: `radix-nova`, CSS variables in `src/app/globals.css`).
+
+| Path | Role |
+|------|------|
+| `components.json` | shadcn CLI config (aliases, style, Tailwind paths) |
+| `src/components/ui/` | Installed shadcn components (e.g. `button.tsx`) |
+| `src/lib/utils.ts` | `cn()` helper — merges Tailwind classes with `clsx` + `tailwind-merge` |
+
+Add more components from the `client/` directory:
+
+```bash
+cd client
+npx shadcn@latest add card dialog input
+```
+
+Example usage:
+
+```tsx
+import { Button } from "@/components/ui/button";
+
+<Button variant="outline">Play</Button>
+```
 
 ### Backend (`server/`)
 
