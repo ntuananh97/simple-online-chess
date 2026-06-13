@@ -1,12 +1,17 @@
+import { createServer } from "node:http";
 import app from "./app";
 import { prisma } from "./lib/prisma";
+import { setupSocket } from "./socket";
+import type { AppServer } from "./socket/types";
 
 const PORT = process.env.PORT ?? 5000;
 
-let server: ReturnType<typeof app.listen>;
+let httpServer: ReturnType<typeof createServer>;
+let io: AppServer;
 
 async function shutdown(): Promise<void> {
-  server.close();
+  io.close();
+  httpServer.close();
   await prisma.$disconnect();
   process.exit(0);
 }
@@ -20,8 +25,12 @@ async function start(): Promise<void> {
     process.exit(1);
   }
 
-  server = app.listen(PORT, () => {
+  httpServer = createServer(app);
+  io = setupSocket(httpServer);
+
+  httpServer.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`WebSocket ready (Socket.IO)`);
   });
 }
 

@@ -98,3 +98,27 @@ export async function joinRoom(code: string, blackId: string): Promise<RoomData>
     createdAt: updated.createdAt,
   };
 }
+
+export async function verifyRoomAccess(
+  code: string,
+  playerId: string,
+): Promise<RoomData> {
+  const room = await prisma.room.findUnique({
+    where: { roomCode: code.toUpperCase() },
+  });
+
+  if (!room) {
+    throw new JoinRoomError("Room not found", 404);
+  }
+
+  if (room.whiteId !== playerId && room.blackId !== playerId) {
+    throw new JoinRoomError("Not a member of this room", 403);
+  }
+
+  return {
+    id: room.id,
+    code: room.roomCode,
+    status: room.status,
+    createdAt: room.createdAt,
+  };
+}

@@ -21,6 +21,7 @@ Keep types in **dedicated files** under `src/types/` — do not define `interfac
 - **One file per feature**: `src/types/<feature>.types.ts` (e.g. `room.types.ts`, `game.types.ts`)
 - **Export from the types file**; import elsewhere with `import type { ... } from "../types/<feature>.types"`
 - **Group related types** in the same file: domain entities (`RoomData`), request bodies (`CreateRoomBody`), and other shared shapes for that feature
+- **Socket events** — `src/types/socket.types.ts` for WebSocket payloads (separate from REST types)
 - **Prisma enums** (e.g. `RoomStatus`) stay in the generated client; re-export or reference them from types files when needed
 
 ### Directory layout
@@ -30,7 +31,8 @@ server/src/
 ├── index.ts              # Entry point — starts the server
 ├── app.ts                # Express app setup (middleware, route mounting)
 ├── types/
-│   └── room.types.ts     # add <feature>.types.ts per endpoint (e.g. health.types.ts)
+│   ├── room.types.ts     # add <feature>.types.ts per endpoint (e.g. health.types.ts)
+│   └── socket.types.ts   # WebSocket event payloads
 ├── models/
 │   ├── health.model.ts
 │   └── room.model.ts
@@ -40,10 +42,15 @@ server/src/
 ├── controllers/
 │   ├── health.controller.ts
 │   └── room.controller.ts
-└── routes/
-    ├── index.ts          # Combines and mounts all route modules
-    ├── health.routes.ts
-    └── room.routes.ts
+├── routes/
+│   ├── index.ts          # Combines and mounts all route modules
+│   ├── health.routes.ts
+│   └── room.routes.ts
+└── socket/
+    ├── index.ts          # Socket.IO setup — attach to HTTP server
+    ├── types.ts          # Typed Server / Socket aliases
+    └── handlers/
+        └── room.handler.ts   # Real-time room events
 ```
 
 ### Adding a new endpoint
@@ -89,6 +96,62 @@ Request → Routes → Controller → Model  (imports types from src/types/)
 | `npm start` | Run compiled output |
 
 Default port: `5000` (override with `PORT` environment variable). The Next.js client uses port `3000` by default.
+
+## WebSocket (Socket.IO)
+
+Real-time game events use **Socket.IO 4** on the same HTTP server as Express. CORS for WebSocket connections follows `CLIENT_ORIGIN` (same as REST).
+
+### Architecture
+
+Socket handlers live under `src/socket/` and follow the same separation as HTTP:
+
+| Piece | Location | Responsibility |
+|-------|----------|----------------|
+| **Types** | `src/types/socket.types.ts` | Client ↔ server event names and payload shapes |
+| **Setup** | `src/socket/index.ts` | Create `Socket.IO` server, register connection handlers |
+| **Handlers** | `src/socket/handlers/` | Event logic (like controllers for WebSocket) |
+| **Model** | `src/models/` | Shared business rules (e.g. `verifyRoomAccess`) |
+
+Entry point (`src/index.ts`) creates an `http.Server` from the Express app, attaches Socket.IO, then listens on `PORT`.
+
+### Client connection
+
+Connect from the Next.js client to the same host as the REST API:
+
+```ts
+import { io } from "socket.io-client";
+
+const socket = io(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000");
+```
+
+### Events
+
+#### Client → Server
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `room:join` | `{ code: string; playerId: string }` | Join a Socket.IO room after creating/joining via REST. Optional ack callback returns `{ ok, room?, error? }`. |
+| `room:leave` | — | Leave the current room channel |
+
+#### Server → Client
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `room:player-joined` | `{ playerId, status }` | Another player connected to the room |
+| `room:player-left` | `{ playerId }` | A player disconnected or left |
+| `room:error` | `{ message }` | Reserved for future error broadcasts |
+
+### Typical flow
+
+1. **REST** — `POST /rooms` or `POST /rooms/join` to create or join a room in the database.
+2. **WebSocket** — emit `room:join` with the room code and local `playerId` to subscribe to real-time updates.
+3. Opponents receive `room:player-joined` / `room:player-left` when players connect or disconnect.
+
+### Adding a new socket event
+
+1. **Types** — add payloads to `ClientToServerEvents` or `ServerToClientEvents` in `src/types/socket.types.ts`.
+2. **Handler** — implement the event in `src/socket/handlers/<feature>.handler.ts` (call model layer for validation).
+3. **Register** — import and call the handler from `src/socket/index.ts` inside the `connection` callback.
 
 ## Database (Prisma + Neon PostgreSQL)
 

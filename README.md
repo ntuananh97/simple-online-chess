@@ -64,6 +64,40 @@ const health = await healthApi.getHealth();
 
 When adding a new endpoint, create matching types and an `*.api.ts` module that uses `apiFetch`.
 
+#### Socket client (Socket.IO)
+
+Real-time events use **Socket.IO 4** on the same host as the REST API (`NEXT_PUBLIC_API_URL`). Event types mirror `server/src/types/socket.types.ts`.
+
+| File | Role |
+|------|------|
+| `src/lib/socket/config.ts` | WebSocket URL from `NEXT_PUBLIC_API_URL` |
+| `src/lib/socket/socket.ts` | Typed singleton via `getSocket()` / `disconnectSocket()` |
+| `src/types/socket.types.ts` | Client ↔ server event payloads |
+
+Example — join a room channel after REST create/join:
+
+```ts
+import { getSocket } from "@/lib/socket";
+
+const socket = getSocket();
+
+if (!socket.connected) {
+  socket.connect();
+}
+
+socket.emit("room:join", { code: roomCode, playerId }, (ack) => {
+  if (ack.ok) {
+  console.log("Joined room:", ack.room);
+  }
+});
+
+socket.on("room:player-joined", ({ playerId, status }) => {
+  console.log("Player joined:", playerId, status);
+});
+```
+
+See [server/README.md](server/README.md) for the full event list and typical REST → WebSocket flow.
+
 #### UI components (shadcn/ui)
 
 The client uses [shadcn/ui](https://ui.shadcn.com/) for reusable, accessible components. Configuration lives in `client/components.json` (style: `radix-nova`, CSS variables in `src/app/globals.css`).

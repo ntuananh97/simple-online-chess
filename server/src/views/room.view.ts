@@ -16,3 +16,7 @@ export function formatCreateRoomResponse(data: RoomData) {
 export function formatJoinRoomResponse(data: RoomData) {
   return formatRoomResponse(data);
 }
+
+export function formatGetRoomResponse(data: RoomData) {
+  return formatRoomResponse(data);
+}
