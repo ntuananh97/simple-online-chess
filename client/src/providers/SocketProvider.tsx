@@ -25,7 +25,7 @@ interface SocketProviderProps {
 }
 
 export function SocketProvider({ children }: SocketProviderProps) {
-  const [socket] = useState(() => getSocket());
+  const [socket] = useState(() => getSocket()); // Initialize socket only once
   const [connected, setConnected] = useState(socket.connected);
 
   const connect = useCallback(() => {

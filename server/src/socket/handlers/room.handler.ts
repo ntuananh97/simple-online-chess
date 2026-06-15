@@ -1,6 +1,6 @@
-import { verifyRoomAccess, JoinRoomError } from "../../models/room.model";
+import { getOrCreateGame } from "../../models/game.model";
+import { getRoomGameState, JoinRoomError } from "../../models/room.model";
 import type { AppSocket } from "../types";
-
 function roomChannel(roomId: string): string {
   return `room:${roomId}`;
 }
@@ -15,7 +15,7 @@ export function registerRoomHandlers(socket: AppSocket): void {
     }
 
     try {
-      const room = await verifyRoomAccess(code, playerId);
+      const room = await getRoomGameState(code, playerId);
 
       if (socket.data.roomId && socket.data.roomId !== room.id) {
         await socket.leave(roomChannel(socket.data.roomId));
@@ -25,13 +25,32 @@ export function registerRoomHandlers(socket: AppSocket): void {
       socket.data.roomId = room.id;
       await socket.join(roomChannel(room.id));
 
+      const chess = getOrCreateGame(room.id, room.fen);
+
+      socket.emit("room:state", {
+        id: room.id,
+        code: room.code,
+        status: room.status,
+        fen: chess.fen(),
+        turn: chess.turn(),
+        whiteId: room.whiteId,
+        blackId: room.blackId,
+      });
+
       socket.to(roomChannel(room.id)).emit("room:player-joined", {
         playerId,
         status: room.status,
       });
 
-      ack?.({ ok: true, room });
-    } catch (error) {
+      ack?.({
+        ok: true,
+        room: {
+          id: room.id,
+          code: room.code,
+          status: room.status,
+          createdAt: room.createdAt,
+        },
+      });    } catch (error) {
       const message =
         error instanceof JoinRoomError
           ? error.message

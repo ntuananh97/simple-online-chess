@@ -18,20 +18,14 @@ export function useListenEvent<E extends keyof ServerToClientEvents>(
   });
 
   useEffect(() => {
-    // const handler = ((...args: Parameters<ServerToClientEvents[E]>) => {
-    //   (callbackRef.current as (...args: Parameters<ServerToClientEvents[E]>) => void)(
-    //     ...args,
-    //   );
-    // }) as ServerToClientEvents[E];
+    const handler = (...args: Parameters<ServerToClientEvents[E]>) => {
+      (callbackRef.current as (...args: Parameters<ServerToClientEvents[E]>) => void)(
+        ...args,
+      );
+    };
 
-    if (!socket) return;
-
-    const handler = callbackRef.current
-
-    const on = socket.on as (ev: E, fn: ServerToClientEvents[E]) => void;
-    const off = socket.off as (ev: E, fn: ServerToClientEvents[E]) => void;
-    // const on = socket.on as (ev: E, fn: ServerToClientEvents[E]) => void;
-    // const off = socket.off as (ev: E, fn: ServerToClientEvents[E]) => void;
+    const on = socket.on.bind(socket) as (ev: E, fn: typeof handler) => void;
+    const off = socket.off.bind(socket) as (ev: E, fn: typeof handler) => void;
 
     on(event, handler);
 

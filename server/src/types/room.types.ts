@@ -7,6 +7,16 @@ export interface RoomData {
   createdAt: Date;
 }
 
+export interface RoomGameState {
+  id: string;
+  code: string;
+  status: RoomStatus;
+  fen: string;
+  whiteId: string | null;
+  blackId: string | null;
+  createdAt: Date;
+}
+
 export interface CreateRoomBody {
   whiteId: string;
 }

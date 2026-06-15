@@ -110,9 +110,19 @@ Socket handlers live under `src/socket/` and follow the same separation as HTTP:
 | **Types** | `src/types/socket.types.ts` | Client ↔ server event names and payload shapes |
 | **Setup** | `src/socket/index.ts` | Create `Socket.IO` server, register connection handlers |
 | **Handlers** | `src/socket/handlers/` | Event logic (like controllers for WebSocket) |
-| **Model** | `src/models/` | Shared business rules (e.g. `verifyRoomAccess`) |
+| **Model** | `src/models/` | Shared business rules (e.g. `verifyRoomAccess`, `game.model` RAM store) |
 
 Entry point (`src/index.ts`) creates an `http.Server` from the Express app, attaches Socket.IO, then listens on `PORT`.
+
+### In-memory game state (chess.js)
+
+Active games are held in a `Map<roomId, Chess>` in [`src/models/game.model.ts`](src/models/game.model.ts). When a client emits `room:join`, the handler loads or creates a `chess.js` instance from the room's `fen` in the database. The RAM map is the source of truth while a game is in progress (fast move validation). If the server restarts, the map is empty and instances are recreated from the stored `fen`.
+
+| Function | Description |
+|----------|-------------|
+| `getOrCreateGame(roomId, fen)` | Return existing `Chess` instance or create one from FEN |
+| `getGame(roomId)` | Get instance without creating (for move validation) |
+| `removeGame(roomId)` | Remove instance from map (cleanup when game ends) |
 
 ### Client connection
 
@@ -139,13 +149,15 @@ const socket = io(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000");
 |-------|---------|-------------|
 | `room:player-joined` | `{ playerId, status }` | Another player connected to the room |
 | `room:player-left` | `{ playerId }` | A player disconnected or left |
+| `room:state` | `{ id, code, status, fen, turn, whiteId, blackId }` | Full game state sent to the joining client only |
 | `room:error` | `{ message }` | Reserved for future error broadcasts |
 
 ### Typical flow
 
 1. **REST** — `POST /rooms` or `POST /rooms/join` to create or join a room in the database.
 2. **WebSocket** — emit `room:join` with the room code and local `playerId` to subscribe to real-time updates.
-3. Opponents receive `room:player-joined` / `room:player-left` when players connect or disconnect.
+3. Server responds to the joining client with `room:state` (FEN, turn, player IDs).
+4. Opponents receive `room:player-joined` / `room:player-left` when players connect or disconnect.
 
 ### Adding a new socket event
 

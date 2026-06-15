@@ -9,6 +9,9 @@ import { ApiError } from "@/lib/api/fetch";
 import { roomApi } from "@/lib/api/room.api";
 import { useUserStore } from "@/stores/useUserStore";
 import type { IRoomResponse } from "@/types/room.types";
+import type { RoomStatePayload } from "@/types/socket.types";
+import { useSocket } from "@/providers/SocketProvider";
+import { useListenEvent } from "@/hooks/useListenEvent";
 
 interface PlayPageProps {
   roomCode: string;
@@ -17,42 +20,60 @@ interface PlayPageProps {
 export function PlayPage({ roomCode }: PlayPageProps) {
   const getUserId = useUserStore((state) => state.getUserId);
   const [room, setRoom] = useState<IRoomResponse | null>(null);
+  const [gameState, setGameState] = useState<RoomStatePayload | null>(null);
+  console.log("🚀 ~ PlayPage ~ gameState:", gameState)
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const { socket } = useSocket();
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadRoom() {
-      setIsLoading(true);
-      setError(null);
+    // async function loadRoom() {
+    //   setIsLoading(true);
+    //   setError(null);
 
-      try {
-        const playerId = getUserId();
-        const data = await roomApi.getRoom(roomCode, playerId);
+    //   try {
+    //     const playerId = getUserId();
+    //     const data = await roomApi.getRoom(roomCode, playerId);
 
-        if (!cancelled) {
-          setRoom(data);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          const message =
-            err instanceof ApiError ? err.message : "Không thể tải thông tin phòng";
-          setError(message);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
-      }
-    }
+    //     if (!cancelled) {
+    //       setRoom(data);
+    //     }
+    //   } catch (err) {
+    //     if (!cancelled) {
+    //       const message =
+    //         err instanceof ApiError ? err.message : "Không thể tải thông tin phòng";
+    //       setError(message);
+    //     }
+    //   } finally {
+    //     if (!cancelled) {
+    //       setIsLoading(false);
+    //     }
+    //   }
+    // }
 
-    void loadRoom();
+    // void loadRoom();
 
+    socket.emit("room:join", { code: roomCode, playerId: getUserId() });
     return () => {
       cancelled = true;
+      socket.emit("room:leave");
     };
-  }, [roomCode, getUserId]);
+  }, [roomCode, getUserId, socket]);
+
+  useListenEvent("room:player-joined", (data) => {
+    setGameState((prev) => ({ ...prev, status: data.status }) as RoomStatePayload);
+  });
+
+  useListenEvent("room:state", (data) => {
+    setGameState(data);
+    // setRoom((prev) =>
+    //   prev ? { ...prev, status: data.status } : prev,
+    // );
+    setIsLoading(false)
+  });
 
   return (
     <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden bg-linear-to-b from-amber-50/50 via-background to-background px-6 py-16 dark:from-amber-950/20">
@@ -87,8 +108,13 @@ export function PlayPage({ roomCode }: PlayPageProps) {
           </div>
         )}
 
-        {!isLoading && room && (
-          <RoomStatusDisplay code={room.code} status={room.status} />
+        {!isLoading && gameState && (
+          <>
+            <RoomStatusDisplay code={gameState.code} status={gameState.status} />
+            <p className="text-xs text-muted-foreground">
+              Lượt: {gameState.turn === "w" ? "Trắng" : "Đen"}
+            </p>
+          </>
         )}
       </main>
     </div>

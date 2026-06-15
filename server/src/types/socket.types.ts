@@ -20,6 +20,16 @@ export interface PlayerLeftPayload {
   playerId: string;
 }
 
+export interface RoomStatePayload {
+  id: string;
+  code: string;
+  status: RoomData["status"];
+  fen: string;
+  turn: "w" | "b";
+  whiteId: string | null;
+  blackId: string | null;
+}
+
 export interface ClientToServerEvents {
   "room:join": (
     payload: JoinRoomPayload,
@@ -31,6 +41,7 @@ export interface ClientToServerEvents {
 export interface ServerToClientEvents {
   "room:player-joined": (payload: PlayerJoinedPayload) => void;
   "room:player-left": (payload: PlayerLeftPayload) => void;
+  "room:state": (payload: RoomStatePayload) => void;
   "room:error": (payload: { message: string }) => void;
 }
 

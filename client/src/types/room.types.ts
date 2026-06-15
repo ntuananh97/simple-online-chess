@@ -4,6 +4,9 @@ export interface IRoomResponse {
   id: string;
   code: string;
   status: RoomStatus;
+  fen: string;
+  whiteId?: string;
+  blackId?: string;
   createdAt: string;
 }
 

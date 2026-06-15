@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { prisma } from "../lib/prisma";
-import type { RoomData } from "../types/room.types";
+import type { RoomData, RoomGameState } from "../types/room.types";
 
 export class JoinRoomError extends Error {
   constructor(
@@ -119,6 +119,33 @@ export async function verifyRoomAccess(
     id: room.id,
     code: room.roomCode,
     status: room.status,
+    createdAt: room.createdAt,
+  };
+}
+
+export async function getRoomGameState(
+  code: string,
+  playerId: string,
+): Promise<RoomGameState> {
+  const room = await prisma.room.findUnique({
+    where: { roomCode: code.toUpperCase() },
+  });
+
+  if (!room) {
+    throw new JoinRoomError("Room not found", 404);
+  }
+
+  if (room.whiteId !== playerId && room.blackId !== playerId) {
+    throw new JoinRoomError("Not a member of this room", 403);
+  }
+
+  return {
+    id: room.id,
+    code: room.roomCode,
+    status: room.status,
+    fen: room.fen,
+    whiteId: room.whiteId,
+    blackId: room.blackId,
     createdAt: room.createdAt,
   };
 }
