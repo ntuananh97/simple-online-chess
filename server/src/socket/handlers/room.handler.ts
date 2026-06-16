@@ -1,5 +1,6 @@
-import { getOrCreateGame } from "../../models/game.model";
+import { getGame, getOrCreateGame } from "../../models/game.model";
 import { getRoomGameState, JoinRoomError } from "../../models/room.model";
+import { IGameOverPayload } from "../../types/socket.types";
 import type { AppSocket } from "../types";
 function roomChannel(roomId: string): string {
   return `room:${roomId}`;
@@ -23,6 +24,7 @@ export function registerRoomHandlers(socket: AppSocket): void {
 
       socket.data.playerId = playerId;
       socket.data.roomId = room.id;
+      socket.data.playerColor = room.whiteId === playerId ? "w" : "b";
       await socket.join(roomChannel(room.id));
 
       const chess = getOrCreateGame(room.id, room.fen);
@@ -67,6 +69,89 @@ export function registerRoomHandlers(socket: AppSocket): void {
   socket.on("disconnect", () => {
     void leaveRoom(socket);
   });
+
+  socket.on("room:move", async (payload) => {
+    const move = payload?.move;
+    const roomId = payload?.roomId;
+    const { roomId: sessionRoomId, playerId, playerColor } = socket.data;
+
+    if (!move || !sessionRoomId || !playerId || !playerColor) {
+      return;
+    }
+
+    if (roomId && roomId !== sessionRoomId) {
+      emitMoveRejected({
+        socket,
+        fen: getGame(sessionRoomId)?.fen() ?? "",
+        error: "Room mismatch",
+      });
+      return;
+    }
+
+    const chess = getGame(sessionRoomId);
+
+    if (!chess) {
+      emitMoveRejected({
+        socket,
+        fen: "",
+        error: "Game not initialized",
+      });
+      return;
+    }
+
+    if (chess.turn() !== playerColor) {
+      emitMoveRejected({
+        socket,
+        fen: chess.fen(),
+        error: "Not your turn",
+      });
+      return;
+    }
+
+    try {
+      const result = chess.move(move);
+      if (result) {
+        socket.to(roomChannel(sessionRoomId)).emit("room:move-made", move);
+        const isGameOver = chess.isGameOver();
+
+        let winner = null;
+        let reason = "draw";
+        if (chess.isCheckmate()) {
+          winner = chess.turn() === "w" ? "black" : "white";
+          reason = "checkmate";
+        }
+        if (isGameOver) {
+          socket.nsp.to(roomChannel(sessionRoomId)).emit("room:game-over", {
+            winner,
+            reason,
+          } as IGameOverPayload);
+        }
+      } else {
+        emitMoveRejected({
+          socket,
+          fen: chess.fen(),
+          error: "Invalid move",
+        });
+      }
+    } catch (error) {
+      emitMoveRejected({
+        socket,
+        fen: chess.fen(),
+        error: "Internal server error",
+      });
+
+    }
+  });
+}
+
+const emitMoveRejected = ({
+  socket, fen, error,
+}: {
+  socket: AppSocket;
+  fen: string;
+  error: string;
+}) => {
+  socket.emit("room:move-rejected", { fen, error });
 }
 
 async function leaveRoom(socket: AppSocket): Promise<void> {
@@ -82,4 +167,5 @@ async function leaveRoom(socket: AppSocket): Promise<void> {
 
   socket.data.playerId = undefined;
   socket.data.roomId = undefined;
+  socket.data.playerColor = undefined;
 }
