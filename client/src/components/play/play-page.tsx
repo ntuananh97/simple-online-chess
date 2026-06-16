@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,8 @@ import type { IRoomResponse } from "@/types/room.types";
 import type { RoomStatePayload } from "@/types/socket.types";
 import { useSocket } from "@/providers/SocketProvider";
 import { useListenEvent } from "@/hooks/useListenEvent";
+import ChessGame from "../chessgame/chessgame";
+import { ChessboardOptions } from "react-chessboard";
 
 interface PlayPageProps {
   roomCode: string;
@@ -19,13 +21,21 @@ interface PlayPageProps {
 
 export function PlayPage({ roomCode }: PlayPageProps) {
   const getUserId = useUserStore((state) => state.getUserId);
-  const [room, setRoom] = useState<IRoomResponse | null>(null);
-  const [gameState, setGameState] = useState<RoomStatePayload | null>(null);
+  const userId = getUserId();
+  // const [room, setRoom] = useState<IRoomResponse | null>(null);
+  const [gameState, setGameState] = useState<RoomStatePayload>({} as RoomStatePayload);
   console.log("🚀 ~ PlayPage ~ gameState:", gameState)
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const { socket } = useSocket();
+  const uniqueId = useId();
+
+  const chessboardOptions: ChessboardOptions = {
+    position: gameState?.fen || "",
+    id: uniqueId,
+    boardOrientation: gameState.whiteId === userId ? "white" : "black"
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -56,12 +66,12 @@ export function PlayPage({ roomCode }: PlayPageProps) {
 
     // void loadRoom();
 
-    socket.emit("room:join", { code: roomCode, playerId: getUserId() });
+    socket.emit("room:join", { code: roomCode, playerId: userId });
     return () => {
       cancelled = true;
       socket.emit("room:leave");
     };
-  }, [roomCode, getUserId, socket]);
+  }, [roomCode, userId, socket]);
 
   useListenEvent("room:player-joined", (data) => {
     setGameState((prev) => ({ ...prev, status: data.status }) as RoomStatePayload);
@@ -110,10 +120,14 @@ export function PlayPage({ roomCode }: PlayPageProps) {
 
         {!isLoading && gameState && (
           <>
-            <RoomStatusDisplay code={gameState.code} status={gameState.status} />
+          {gameState.status === "PLAYING" ? <ChessGame chessboardOptions={chessboardOptions} /> : <>
+          <RoomStatusDisplay code={gameState.code} status={gameState.status} />
             <p className="text-xs text-muted-foreground">
               Lượt: {gameState.turn === "w" ? "Trắng" : "Đen"}
             </p>
+          
+          </>}
+           
           </>
         )}
       </main>
