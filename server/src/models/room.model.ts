@@ -123,6 +123,23 @@ export async function verifyRoomAccess(
   };
 }
 
+export async function getRoomById(id: string): Promise<RoomData | null> {
+  const room = await prisma.room.findUnique({
+    where: { id },
+  });
+
+  if (!room) {
+    return null;
+  }
+
+  return {
+    id: room.id,
+    code: room.roomCode,
+    status: room.status,
+    createdAt: room.createdAt,
+  };
+}
+
 export async function getRoomGameState(
   code: string,
   playerId: string,
@@ -149,3 +166,40 @@ export async function getRoomGameState(
     createdAt: room.createdAt,
   };
 }
+
+export async function updateRoomGameState(
+  payload: Partial<RoomGameState>,
+): Promise<RoomGameState> {
+  const { id, fen, status } = payload;
+  if (!id) {
+    throw new JoinRoomError("Room ID is required", 400);
+  }
+
+  if (!fen && !status) {
+    throw new JoinRoomError("FEN or status is required", 400);
+  }
+
+  const room = await prisma.room.findUnique({
+    where: { id },
+  });
+
+  if (!room) {
+    throw new JoinRoomError("Room not found", 404);
+  }
+
+  const updated = await prisma.room.update({
+    where: { id },
+    data: { fen, status },
+  });
+
+  return {
+    id: updated.id,
+    code: updated.roomCode,
+    status: updated.status,
+    fen: updated.fen,
+    whiteId: updated.whiteId,
+    blackId: updated.blackId,
+    createdAt: updated.createdAt,
+  };
+}
+ 

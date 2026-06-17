@@ -63,8 +63,18 @@ export function GameOverDisplay({
   const result = getGameResult(payload, userId, whiteId, blackId);
   const config = RESULT_CONFIG[result];
   const Icon = config.icon;
+
+  const description =
+    payload.reason === "abandoned"
+      ? "Your opponent didn't return, the game was abandoned."
+      : config.description;
+
   const reasonLabel =
-    payload.reason === "checkmate" ? "Checkmate" : "Draw";
+    payload.reason === "checkmate"
+      ? "Checkmate"
+      : payload.reason === "abandoned"
+        ? "Abandoned"
+        : "Draw";
 
   return (
     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 rounded-lg bg-background/85 p-6 backdrop-blur-sm">
@@ -73,9 +83,7 @@ export function GameOverDisplay({
         <p className={`text-xl font-semibold ${config.className}`}>
           {config.title}
         </p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {config.description}
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
         <p className="mt-2 text-xs text-muted-foreground">{reasonLabel}</p>
       </div>
       <Button onClick={onLeave}>Leave Room</Button>

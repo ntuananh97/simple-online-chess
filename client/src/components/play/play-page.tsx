@@ -24,14 +24,14 @@ export function PlayPage({ roomCode }: PlayPageProps) {
   const getUserId = useUserStore((state) => state.getUserId);
   const userId = getUserId();
   const [gameState, setGameState] = useState<RoomStatePayload>({} as RoomStatePayload);
-  console.log("🚀 ~ PlayPage ~ gameState:", gameState)
   const [gameOver, setGameOver] = useState<IGameOverPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [opponentDisconnected, setOpponentDisconnected] = useState(false);
 
   const { socket } = useSocket();
   const uniqueId = useId();
-  
+
   const {
     chessPosition,
     onSquareClick,
@@ -43,7 +43,8 @@ export function PlayPage({ roomCode }: PlayPageProps) {
     onMove: (move) => {
       socket.emit("room:move", { move, roomId: gameState.id });
     },
-    isActiveGame: gameState.status === "PLAYING" && !gameOver,
+    isActiveGame:
+      gameState.status === "PLAYING",
   });
 
   const chessboardOptions: ChessboardOptions = {
@@ -68,13 +69,22 @@ export function PlayPage({ roomCode }: PlayPageProps) {
   }, [roomCode, userId, socket]);
 
   useListenEvent("room:player-joined", (data) => {
+    if (data.playerId !== userId) {
+      setOpponentDisconnected(false);
+    }
     setGameState((prev) => ({ ...prev, status: data.status }) as RoomStatePayload);
+  });
+
+  useListenEvent("room:player-left", (data) => {
+    if (data.playerId !== userId) {
+      setOpponentDisconnected(true);
+    }
   });
 
   useListenEvent("room:state", (data) => {
     setGameState(data);
     setPosition(data.fen);
-    setIsLoading(false)
+    setIsLoading(false);
   });
 
   useListenEvent("room:move-rejected", (data) => {
@@ -82,12 +92,20 @@ export function PlayPage({ roomCode }: PlayPageProps) {
   });
 
   useListenEvent("room:move-made", (data) => {
-    moveMadeFromServer(data)
+    moveMadeFromServer(data);
   });
 
   useListenEvent("room:game-over", (data) => {
     setGameOver(data);
     setGameState((prev) => ({ ...prev, status: "COMPLETED" }) as RoomStatePayload);
+  });
+
+  useListenEvent("room:abandoned", (data) => {
+    setOpponentDisconnected(false);
+    setGameState((prev) => {
+      setGameOver({ winner: null, reason: "abandoned" });
+      return { ...prev, status: "ABANDONED", fen: data.fen };
+    });
   });
 
   return (
@@ -127,6 +145,11 @@ export function PlayPage({ roomCode }: PlayPageProps) {
           <>
             {gameState.status === "PLAYING" || gameOver ? (
               <div className="relative w-full">
+                {opponentDisconnected && !gameOver && (
+                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+                    Đối thủ đã rời — đang chờ kết nối lại (tối đa 30 giây)
+                  </div>
+                )}
                 <ChessGame chessboardOptions={chessboardOptions} />
                 {gameOver && (
                   <GameOverDisplay

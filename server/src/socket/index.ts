@@ -1,5 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
+import { setGameIo } from "../models/game.model";
 import { registerRoomHandlers } from "./handlers/room.handler";
 import type { AppServer } from "./types";
 
@@ -12,6 +13,8 @@ export function setupSocket(httpServer: HttpServer): AppServer {
       methods: ["GET", "POST"],
     },
   });
+
+  setGameIo(io);
 
   io.on("connection", (socket) => {
     console.log(`Socket connected: ${socket.id}`);

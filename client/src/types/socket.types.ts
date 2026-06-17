@@ -37,8 +37,14 @@ export interface RoomMovePayload {
 }
 
 export interface IGameOverPayload {
-  winner: "white" | "black";
-  reason: "draw" | "checkmate";
+  winner: "white" | "black" | null;
+  reason: "draw" | "checkmate" | "abandoned";
+}
+
+export interface RoomAbandonedPayload {
+  fen: string;
+  status: "ABANDONED";
+  abandonedBy: string;
 }
 
 export interface ClientToServerEvents {
@@ -58,4 +64,5 @@ export interface ServerToClientEvents {
   "room:move-rejected": (payload: { fen: string, error: string }) => void;
   "room:move-made": (payload: IChessMove) => void;
   "room:game-over": (payload: IGameOverPayload) => void;
+  "room:abandoned": (payload: RoomAbandonedPayload) => void;
 }

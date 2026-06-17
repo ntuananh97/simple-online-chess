@@ -11,6 +11,7 @@ interface IUserStore {
 export const useUserStore = create<IUserStore>((set, get) => ({
   userId: undefined,
   getUserId: () => {
+    if (typeof window === 'undefined') return '';
     const userId = get().userId;
     if (userId) return userId;
 
