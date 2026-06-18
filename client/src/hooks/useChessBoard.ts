@@ -1,206 +1,258 @@
-import { IChessMove } from "@/types/chess.types";
+import type { CSSProperties } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Chess, Square } from "chess.js";
-import { useState, useRef, useEffect } from "react";
 import { PieceDropHandlerArgs, SquareHandlerArgs } from "react-chessboard";
-import { toast } from "sonner";
+import type { BoardPolicy, IChessMove, PromotionPiece } from "@/types/chess.types";
 
 const STARTING_FEN = new Chess().fen();
 
-interface IUseChessBoardProps {
-    onMove: (move: IChessMove) => void;
-    isActiveGame?: boolean;
+export interface UseChessBoardReturn {
+  fen: string;
+  optionSquares: Record<string, CSSProperties>;
+  isInCheck: boolean;
+  onSquareClick: (args: SquareHandlerArgs) => void;
+  onPieceDrop: (args: PieceDropHandlerArgs) => boolean;
+  applyMove: (move: IChessMove) => void;
+  loadFen: (fen: string) => void;
+  undo: () => void;
+}
+
+interface UseChessBoardProps {
+  onMoveIntent: (move: IChessMove) => void;
+  policy: BoardPolicy;
+}
+
+function syncCheckState(
+  chess: Chess,
+  setIsInCheck: (value: boolean) => void,
+) {
+  setIsInCheck(chess.inCheck());
 }
 
 export const useChessBoard = ({
-    onMove,
-    isActiveGame = true,
-}: IUseChessBoardProps) => {
-  
-    const chessGameRef = useRef(new Chess());
+  onMoveIntent,
+  policy,
+}: UseChessBoardProps): UseChessBoardReturn => {
+  const chessGameRef = useRef(new Chess());
+  const [fen, setFen] = useState(STARTING_FEN);
+  const [moveFrom, setMoveFrom] = useState("");
+  const [optionSquares, setOptionSquares] = useState<
+    Record<string, CSSProperties>
+  >({});
+  const [isInCheck, setIsInCheck] = useState(false);
 
-    // track the current position of the chess game in state to trigger a re-render of the chessboard
-    const [chessPosition, setChessPosition] = useState(STARTING_FEN);
-    const [moveFrom, setMoveFrom] = useState('');
-    const [optionSquares, setOptionSquares] = useState({});
-    const [isInCheck, setIsInCheck] = useState(false);
+  const clearSelection = useCallback(() => {
+    setMoveFrom("");
+    setOptionSquares({});
+  }, []);
 
-    useEffect(() => {
-      if (!isInCheck) return;
-      toast.error('Check!');
-    }, [isInCheck]);
+  const syncBoardState = useCallback(() => {
+    setFen(chessGameRef.current.fen());
+    syncCheckState(chessGameRef.current, setIsInCheck);
+  }, []);
 
+  const canControlSquare = useCallback(
+    (square: Square) => {
+      if (!policy.interactive) {
+        return false;
+      }
 
-    // get the move options for a square to show valid moves
-    function getMoveOptions(square: Square) {
-      // get the moves for the square
+      const piece = chessGameRef.current.get(square);
+      if (!piece) {
+        return false;
+      }
+
+      const turn = chessGameRef.current.turn();
+      return (
+        policy.controllableColors.includes(turn) &&
+        piece.color === turn
+      );
+    },
+    [policy.interactive, policy.controllableColors],
+  );
+
+  const resolvePromotion = useCallback(
+    (from: string, to: string): PromotionPiece | undefined => {
+      if (policy.autoPromote === false) {
+        return undefined;
+      }
+
+      const piece = chessGameRef.current.get(from as Square);
+      const isPromotion =
+        piece?.type === "p" &&
+        ((piece.color === "w" && to.endsWith("8")) ||
+          (piece.color === "b" && to.endsWith("1")));
+
+      if (!isPromotion) {
+        return undefined;
+      }
+
+      return policy.autoPromote ?? "q";
+    },
+    [policy.autoPromote],
+  );
+
+  const buildMove = useCallback(
+    (from: string, to: string): IChessMove => {
+      const promotion = resolvePromotion(from, to);
+      return promotion ? { from, to, promotion } : { from, to };
+    },
+    [resolvePromotion],
+  );
+
+  const isLegalMove = useCallback((from: string, to: string) => {
+    const moves = chessGameRef.current.moves({
+      square: from as Square,
+      verbose: true,
+    });
+
+    return moves.some((move) => move.from === from && move.to === to);
+  }, []);
+
+  const emitMoveIntent = useCallback(
+    (from: string, to: string) => {
+      if (!isLegalMove(from, to)) {
+        return false;
+      }
+
+      const move = buildMove(from, to);
+      clearSelection();
+      onMoveIntent(move);
+      return true;
+    },
+    [buildMove, clearSelection, isLegalMove, onMoveIntent],
+  );
+
+  const getMoveOptions = useCallback(
+    (square: Square) => {
       const moves = chessGameRef.current.moves({
         square,
-        verbose: true
+        verbose: true,
       });
 
-      // if no moves, clear the option squares
       if (moves.length === 0) {
         setOptionSquares({});
         return false;
       }
 
-      // create a new object to store the option squares
-      const newSquares: Record<string, React.CSSProperties> = {};
+      const newSquares: Record<string, CSSProperties> = {};
 
-      // loop through the moves and set the option squares
       for (const move of moves) {
+        const targetPiece = chessGameRef.current.get(move.to as Square);
+        const sourcePiece = chessGameRef.current.get(square);
+        const isCapture =
+          targetPiece && sourcePiece && targetPiece.color !== sourcePiece.color;
+
         newSquares[move.to] = {
-          background: chessGameRef.current.get(move.to) && chessGameRef.current.get(move.to)?.color !== chessGameRef.current.get(square)?.color ? 'radial-gradient(circle, rgba(0,0,0,.1) 85%, transparent 85%)' // larger circle for capturing
-          : 'radial-gradient(circle, rgba(0,0,0,.1) 25%, transparent 25%)',
-          // smaller circle for moving
-          borderRadius: '50%'
+          background: isCapture
+            ? "radial-gradient(circle, rgba(0,0,0,.1) 85%, transparent 85%)"
+            : "radial-gradient(circle, rgba(0,0,0,.1) 25%, transparent 25%)",
+          borderRadius: "50%",
         };
       }
 
-      // set the square clicked to move from to yellow
       newSquares[square] = {
-        background: 'rgba(255, 255, 0, 0.4)'
+        background: "rgba(255, 255, 0, 0.4)",
       };
 
-      // set the option squares
       setOptionSquares(newSquares);
-
-      // return true to indicate that there are move options
       return true;
-    }
-    function onSquareClick({
-      square,
-      piece
-    }: SquareHandlerArgs) {
-      if (!isActiveGame) return;
-      // piece clicked to move
-      if (!moveFrom && piece) {
-        // get the move options for the square
-        const hasMoveOptions = getMoveOptions(square as Square);
+    },
+    [],
+  );
 
-        // if move options, set the moveFrom to the square
-        if (hasMoveOptions) {
-          setMoveFrom(square);
-        }
-
-        // return early
-        return;
-      }
-
-      // square clicked to move to, check if valid move
-      const moves = chessGameRef.current.moves({
-        square: moveFrom as Square,
-        verbose: true
-      });
-      const foundMove = moves.find(m => m.from === moveFrom && m.to === square);
-
-      // not a valid move
-      if (!foundMove) {
-        // check if clicked on new piece
-        const hasMoveOptions = getMoveOptions(square as Square);
-
-        // if new piece, setMoveFrom, otherwise clear moveFrom
-        setMoveFrom(hasMoveOptions ? square : '');
-
-        // return early
-        return;
-      }
-
-      const userMove = {
-        from: moveFrom,
-        to: square,
-        promotion: 'q'
-      };
-
-      // is normal move
-      try {
-        chessGameRef.current.move(userMove);
-        
-      } catch {
-        // if invalid, setMoveFrom and getMoveOptions
-        const hasMoveOptions = getMoveOptions(square as Square);
-
-        // if new piece, setMoveFrom, otherwise clear moveFrom
-        if (hasMoveOptions) {
-          setMoveFrom(square);
-        }
-
-        // return early
-        return;
-      }
-
-      // update the position state
-      setChessPosition(chessGameRef.current.fen());
-      checkIfInCheck();
-      // clear moveFrom and optionSquares
-      setMoveFrom('');
-      setOptionSquares({});
-      onMove?.(userMove);
-    }
-
-    // handle piece drop
-    function onPieceDrop({
-      sourceSquare,
-      targetSquare
-    }: PieceDropHandlerArgs) {
-      if (!isActiveGame) return false;
-      // type narrow targetSquare potentially being null (e.g. if dropped off board)
-      if (!targetSquare) {
-        return false;
-      }
-
-      // try to make the move according to chess.js logic
-      try {
-        const userMove = {
-          from: sourceSquare,
-          to: targetSquare,
-          promotion: 'q'
-        };
-        chessGameRef.current.move(userMove);
-        checkIfInCheck();
-        // update the position state upon successful move to trigger a re-render of the chessboard
-        setChessPosition(chessGameRef.current.fen());
-
-        // clear moveFrom and optionSquares
-        setMoveFrom('');
-        setOptionSquares({});
-        onMove?.(userMove);
-
-        // return true as the move was successful
-        return true;
-      } catch {
-        // return false as the move was not successful
-        return false;
-      }
-    }
-
-    function setPosition(position: string) {
-      // keep chess.js engine and board UI in sync with server state
-      chessGameRef.current = new Chess(position);
-      setChessPosition(position);
-      setMoveFrom('');
-      setOptionSquares({});
-    }
-
-    const moveMadeFromServer = (move: IChessMove) => {
-      if (!isActiveGame) return;
+  const applyMove = useCallback(
+    (move: IChessMove) => {
       chessGameRef.current.move(move);
-      setChessPosition(chessGameRef.current.fen());
-      checkIfInCheck();
-      setMoveFrom('');
-      setOptionSquares({});
-    }
+      syncBoardState();
+      clearSelection();
+    },
+    [clearSelection, syncBoardState],
+  );
 
-    const checkIfInCheck = () => {
-      setIsInCheck(chessGameRef.current.inCheck());
-    }
+  const loadFen = useCallback(
+    (position: string) => {
+      chessGameRef.current = new Chess(position);
+      setFen(position);
+      syncCheckState(chessGameRef.current, setIsInCheck);
+      clearSelection();
+    },
+    [clearSelection],
+  );
 
-    return {
-        chessPosition,
-        onSquareClick,
-        onPieceDrop,
-        optionSquares,
-        setPosition,
-        moveMadeFromServer
-    }
-}
+  const undo = useCallback(() => {
+    chessGameRef.current.undo();
+    syncBoardState();
+    clearSelection();
+  }, [clearSelection, syncBoardState]);
+
+  const onSquareClick = useCallback(
+    ({ square, piece }: SquareHandlerArgs) => {
+      if (!policy.interactive) {
+        return;
+      }
+
+      if (!moveFrom && piece) {
+        if (!canControlSquare(square as Square)) {
+          return;
+        }
+
+        const hasMoveOptions = getMoveOptions(square as Square);
+        if (hasMoveOptions) {
+          setMoveFrom(square);
+        }
+        return;
+      }
+
+      if (!moveFrom) {
+        return;
+      }
+
+      if (emitMoveIntent(moveFrom, square)) {
+        return;
+      }
+
+      if (piece && canControlSquare(square as Square)) {
+        const hasMoveOptions = getMoveOptions(square as Square);
+        setMoveFrom(hasMoveOptions ? square : "");
+        return;
+      }
+
+      clearSelection();
+    },
+    [
+      canControlSquare,
+      clearSelection,
+      emitMoveIntent,
+      getMoveOptions,
+      moveFrom,
+      policy.interactive,
+    ],
+  );
+
+  const onPieceDrop = useCallback(
+    ({ sourceSquare, targetSquare }: PieceDropHandlerArgs) => {
+      if (!policy.interactive || !targetSquare) {
+        return false;
+      }
+
+      if (!canControlSquare(sourceSquare as Square)) {
+        return false;
+      }
+
+      return emitMoveIntent(sourceSquare, targetSquare);
+    },
+    [canControlSquare, emitMoveIntent, policy.interactive],
+  );
+
+  return {
+    fen,
+    optionSquares,
+    isInCheck,
+    onSquareClick,
+    onPieceDrop,
+    applyMove,
+    loadFen,
+    undo,
+  };
+};

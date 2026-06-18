@@ -154,42 +154,53 @@ The RAM map is the fast path for game logic during an active session. The databa
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| `PlayPage` component | Done | Main play view at `/play/[roomCode]` |
-| Socket `room:join` on mount | Done | Emits with `roomCode` and local `playerId` |
-| Socket `room:leave` on unmount | Done | Cleanup when leaving the page |
-| Listen `room:state` | Done | Sets game state, syncs board FEN, ends loading |
-| Listen `room:player-joined` | Done | Updates room status when opponent joins |
-| Listen `room:move-made` | Done | Applies opponent move via `moveMadeFromServer` |
-| Listen `room:move-rejected` | Done | Resyncs board position from server FEN |
-| Listen `room:game-over` | Done | Shows game-over overlay; sets local status to `COMPLETED` |
+| `PlayPage` component | Done | Thin view component for `/play/[roomCode]`; delegates online game orchestration to `useOnlineGame` |
+| `useOnlineGame` hook | Done | Mode-specific hook for online play; owns socket lifecycle, room state, game-over state, disconnect UI state, and board orchestration |
+| Socket `room:join` on mount | Done | `useOnlineGame` emits with `roomCode` and local `playerId` |
+| Socket `room:leave` on unmount | Done | `useOnlineGame` cleans up when leaving the page |
+| Listen `room:state` | Done | `useOnlineGame` sets game state, calls `board.loadFen(data.fen)`, and ends loading |
+| Listen `room:player-joined` | Done | `useOnlineGame` updates room status and clears opponent-disconnected state |
+| Listen `room:move-made` | Done | `useOnlineGame` applies opponent move via `board.applyMove(move)` |
+| Listen `room:move-rejected` | Done | `useOnlineGame` rolls back optimistic local state via `board.loadFen(fen)` |
+| Listen `room:game-over` | Done | `useOnlineGame` shows game-over overlay data and sets local status to `COMPLETED` |
+| Listen `room:abandoned` | Done | `useOnlineGame` loads abandoned FEN, sets local status to `ABANDONED`, and shows abandoned result |
 | Waiting UI | Done | `RoomStatusDisplay` + turn hint while status is not `PLAYING` |
-| Interactive board (PLAYING) | Done | `ChessGame` + `react-chessboard` shown when `status === "PLAYING"` or after game over |
-| Board orientation | Done | White for `whiteId === userId`, black otherwise |
-| Move emit | Done | `socket.emit("room:move", { move, roomId })` on local move |
+| Interactive board (PLAYING) | Done | `ChessBoard` component shown when `status === "PLAYING"` or after game over |
+| Board orientation | Done | Derived in `useOnlineGame` from player color (`whiteId` / `blackId` vs local `userId`) |
+| Move intent pipeline | Done | `useChessBoard` emits `onMoveIntent`; `useOnlineGame` applies optimistic move and emits `room:move` |
 | `GameOverDisplay` overlay | Done | Win / lose / draw message with "Leave Room" button |
-| `handleLeaveRoom` | Done | Emits `room:leave` and navigates to home |
+| `handleLeaveRoom` | Done | Implemented in `useOnlineGame`; emits `room:leave` and navigates to home |
 | Ack handling for `room:join` | Not done | Join emit does not use the ack callback for error display |
 
 ### `useChessBoard` hook (`client/src/hooks/useChessBoard.ts`)
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Local chess.js engine | Done | `chessGameRef` drives move logic and FEN state |
+| Local chess.js engine | Done | `chessGameRef` drives move validation, FEN state, check state, and legal-move lookup |
 | Click-to-move | Done | Select piece → highlight legal squares → click destination |
 | Drag-and-drop | Done | `onPieceDrop` with chess.js validation |
 | Legal-move highlights | Done | `optionSquares` with distinct styles for moves vs captures |
-| Optimistic local move | Done | Applies move locally, then calls `onMove` to notify server |
-| Server sync | Done | `setPosition(fen)` resets engine on `room:state` / `room:move-rejected` |
-| Opponent move sync | Done | `moveMadeFromServer(move)` applies remote moves |
-| Check notification | Done | Sonner toast when local engine detects check |
-| Auto-queen promotion | Done | Defaults `promotion: "q"` on moves |
-| `isActiveGame` guard | Done | Disables interaction when game is not active or game-over |
+| `onMoveIntent` boundary | Done | Hook emits a move intent instead of deciding the mode-specific side effect itself |
+| Mode-controlled commits | Done | Exposes `applyMove(move)` for optimistic, AI, puzzle, or analysis callers to commit moves explicitly |
+| External FEN sync | Done | Exposes `loadFen(fen)` for server state, rollback, reconnect, puzzle setup, or analysis positions |
+| Undo command | Done | Exposes `undo()` for future non-online modes such as analysis |
+| Check state | Done | Exposes `isInCheck`; UI side effects are handled outside the hook |
+| Auto-promotion policy | Done | `BoardPolicy.autoPromote` defaults online play to queen but can be disabled or changed later |
+| Interaction policy | Done | `BoardPolicy.interactive` and `BoardPolicy.controllableColors` gate interaction by mode and player color |
 
-### `ChessGame` component (`client/src/components/chessgame/chessgame.tsx`)
+### `ChessBoard` component (`client/src/components/chessgame/chessgame.tsx`)
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| `react-chessboard` wrapper | Done | Renders `<Chessboard options={...} />` |
+| `react-chessboard` wrapper | Done | Renders `<Chessboard options={...} />` internally |
+| Semantic props | Done | Receives `fen`, `orientation`, `optionSquares`, and interaction handlers instead of exposing `ChessboardOptions` to pages |
+| Stable board id | Done | Uses an optional caller-provided `id` or a generated React `useId()` value |
+
+### `useCheckToast` hook (`client/src/hooks/useCheckToast.ts`)
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Check notification | Done | Sonner toast for check is separated from `useChessBoard`, so future modes can opt in or skip it |
 
 ### `GameOverDisplay` (`client/src/components/play/game-over-display.tsx`)
 
@@ -211,7 +222,7 @@ The RAM map is the fast path for game logic during an active session. The databa
 | `SocketProvider` | Done | React context; auto-connects on mount |
 | `useListenEvent` | Done | Stable subscription hook for server events |
 | `socket.types.ts` | Done | Room, move, and game-over event payloads |
-| `chess.types.ts` | Done | Shared `IChessMove` `{ from, to, promotion? }` |
+| `chess.types.ts` | Done | Shared `IChessMove`, `ChessColor`, `PromotionPiece`, and `BoardPolicy` types |
 | `room.types.ts` | Done | REST response and request types |
 | shadcn/ui (`Button`, `Input`, `Sonner`) | Done | Used on home and play pages |
 | `react-chessboard` | Done | Interactive board rendering |
@@ -274,8 +285,10 @@ client/src/
 │   ├── play/room-status-display.tsx
 │   └── play/game-over-display.tsx
 ├── hooks/
+│   ├── useCheckToast.ts
 │   ├── useChessBoard.ts
-│   └── useListenEvent.ts
+│   ├── useListenEvent.ts
+│   └── useOnlineGame.ts
 ├── types/
 │   ├── chess.types.ts
 │   ├── room.types.ts
@@ -290,6 +303,6 @@ client/src/
 
 ## Summary
 
-**Done:** End-to-end room creation and joining (REST + redirect), anonymous player identity, Socket.IO room channels, real-time presence, interactive chess board (`react-chessboard` + `useChessBoard`), server-authoritative move validation (`room:move` / `room:move-made` / `room:move-rejected`), checkmate and draw game-over broadcast (`room:game-over`), and client game-over overlay with leave action.
+**Done:** End-to-end room creation and joining (REST + redirect), anonymous player identity, Socket.IO room channels, real-time presence, interactive chess board (`ChessBoard` + `useChessBoard`), client-side move-intent boundary (`onMoveIntent`), online play orchestration in `useOnlineGame`, server-authoritative move validation (`room:move` / `room:move-made` / `room:move-rejected`), checkmate and draw game-over broadcast (`room:game-over`), and client game-over overlay with leave action.
 
 **Next logical steps:** Persist FEN and `COMPLETED` status to the database, abandon flow on disconnect, `removeGame` cleanup, promotion UI, user-facing move-error feedback, and polish (ack errors, reconnect, matchmaking if desired).

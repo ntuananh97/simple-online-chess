@@ -2,7 +2,7 @@ import { Trophy, Frown, Handshake } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { IGameOverPayload } from "@/types/socket.types";
 
-type GameResult = "win" | "lose" | "draw";
+type GameResult = "win" | "lose" | "draw" | "abondoned";
 
 function getGameResult(
   payload: IGameOverPayload,
@@ -12,6 +12,10 @@ function getGameResult(
 ): GameResult {
   if (payload.reason === "draw") {
     return "draw";
+  }
+
+  if (payload.reason === "abandoned") {
+    return "abondoned";
   }
 
   const userWon =
@@ -40,6 +44,12 @@ const RESULT_CONFIG: Record<
   draw: {
     title: "Draw",
     description: "The game ended in a draw.",
+    icon: Handshake,
+    className: "text-amber-600 dark:text-amber-400",
+  },
+  abondoned: {
+    title: "Game Abondoned",
+    description: "The game was abondoned.",
     icon: Handshake,
     className: "text-amber-600 dark:text-amber-400",
   },

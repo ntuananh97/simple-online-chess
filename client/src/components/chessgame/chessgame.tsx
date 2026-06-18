@@ -1,13 +1,44 @@
-"use client"
+"use client";
 
-import { Chessboard, ChessboardOptions } from "react-chessboard"
+import { useId } from "react";
+import {
+  Chessboard,
+  type PieceDropHandlerArgs,
+  type SquareHandlerArgs,
+} from "react-chessboard";
+import type { CSSProperties } from "react";
 
-interface IChessGameProps {
-  chessboardOptions: ChessboardOptions;
+export interface ChessBoardProps {
+  fen: string;
+  orientation: "white" | "black";
+  optionSquares?: Record<string, CSSProperties>;
+  onPieceDrop: (args: PieceDropHandlerArgs) => boolean;
+  onSquareClick: (args: SquareHandlerArgs) => void;
+  id?: string;
 }
 
-const ChessGame = ({chessboardOptions}: IChessGameProps) => {
-  return <Chessboard options={chessboardOptions} />;
+const ChessBoard = ({
+  fen,
+  orientation,
+  optionSquares = {},
+  onPieceDrop,
+  onSquareClick,
+  id,
+}: ChessBoardProps) => {
+  const generatedId = useId();
+
+  return (
+    <Chessboard
+      options={{
+        position: fen,
+        id: id ?? generatedId,
+        boardOrientation: orientation,
+        squareStyles: optionSquares,
+        onPieceDrop,
+        onSquareClick,
+      }}
+    />
+  );
 };
 
-export default ChessGame;
+export default ChessBoard;
