@@ -14,6 +14,8 @@ export interface RoomGameState {
   fen: string;
   whiteId: string | null;
   blackId: string | null;
+  whiteTime: number;
+  blackTime: number;
   createdAt: Date;
 }
 

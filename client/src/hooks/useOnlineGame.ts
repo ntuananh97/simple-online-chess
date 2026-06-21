@@ -3,15 +3,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useChessBoard, type UseChessBoardReturn } from "@/hooks/useChessBoard";
+import {
+  getTurnFromFen,
+  useGameClock,
+  type UseGameClockReturn,
+} from "@/hooks/useGameClock";
 import { useListenEvent } from "@/hooks/useListenEvent";
 import { useSocket } from "@/providers/SocketProvider";
 import { useUserStore } from "@/stores/useUserStore";
 import type { ChessColor, IChessMove } from "@/types/chess.types";
 import type { RoomStatus } from "@/types/room.types";
-import type { IGameOverPayload, RoomStatePayload } from "@/types/socket.types";
+import type {
+  IGameOverPayload,
+  RoomStatePayload,
+  TimeSnapshot,
+} from "@/types/socket.types";
 
 interface UseOnlineGameReturn {
   board: UseChessBoardReturn;
+  clock: UseGameClockReturn;
   orientation: "white" | "black";
   status: RoomStatus | null;
   gameState: RoomStatePayload | null;
@@ -54,6 +64,7 @@ export function useOnlineGame(roomCode: string): UseOnlineGameReturn {
   const orientation: "white" | "black" =
     playerColor === "b" ? "black" : "white";
   const applyMoveRef = useRef<(move: IChessMove) => void>(() => {});
+  const syncTimeRef = useRef<(snapshot: TimeSnapshot) => void>(() => {});
 
   const board = useChessBoard({
     onMoveIntent: (move) => {
@@ -63,13 +74,20 @@ export function useOnlineGame(roomCode: string): UseOnlineGameReturn {
       }
 
       applyMoveRef.current(move);
-      socket.emit("room:move", { move, roomId: currentGameState.id });
+      socket.emit("room:move", { move, roomId: currentGameState.id }, (times) => {
+        syncTimeRef.current(times);
+      });
     },
     policy: {
       interactive: gameState?.status === "PLAYING" && !gameOver,
       controllableColors: playerColor ? [playerColor] : [],
       autoPromote: "q",
     },
+  });
+  const activeColor = getTurnFromFen(board.fen);
+  const clock = useGameClock({
+    isRunning: gameState?.status === "PLAYING" && !gameOver,
+    activeColor,
   });
 
   useEffect(() => {
@@ -79,6 +97,10 @@ export function useOnlineGame(roomCode: string): UseOnlineGameReturn {
   useEffect(() => {
     applyMoveRef.current = board.applyMove;
   }, [board.applyMove]);
+
+  useEffect(() => {
+    syncTimeRef.current = clock.syncTime;
+  }, [clock.syncTime]);
 
   const handleLeaveRoom = useCallback(() => {
     socket.emit("room:leave");
@@ -107,6 +129,11 @@ export function useOnlineGame(roomCode: string): UseOnlineGameReturn {
       setOpponentDisconnected(false);
     }
 
+    syncTimeRef.current({
+      whiteTimeLeft: data.time.whiteTimeLeft,
+      blackTimeLeft: data.time.blackTimeLeft,
+    });
+
     setGameState(
       (prev) =>
         ({
@@ -124,6 +151,10 @@ export function useOnlineGame(roomCode: string): UseOnlineGameReturn {
 
   useListenEvent("room:state", (data) => {
     setGameState(data);
+    syncTimeRef.current({
+      whiteTimeLeft: data.whiteTimeLeft,
+      blackTimeLeft: data.blackTimeLeft,
+    });
     board.loadFen(data.fen);
     setIsLoading(false);
   });
@@ -134,6 +165,10 @@ export function useOnlineGame(roomCode: string): UseOnlineGameReturn {
 
   useListenEvent("room:move-made", (data) => {
     board.applyMove(data);
+    syncTimeRef.current({
+      whiteTimeLeft: data.whiteTimeLeft,
+      blackTimeLeft: data.blackTimeLeft,
+    });
   });
 
   useListenEvent("room:game-over", (data) => {
@@ -163,6 +198,7 @@ export function useOnlineGame(roomCode: string): UseOnlineGameReturn {
 
   return {
     board,
+    clock,
     orientation,
     status: (gameState?.status ?? null) as RoomStatus | null,
     gameState,

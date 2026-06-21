@@ -84,7 +84,9 @@ export function GameOverDisplay({
       ? "Checkmate"
       : payload.reason === "abandoned"
         ? "Abandoned"
-        : "Draw";
+        : payload.reason === "timeout"
+          ? "Timeout"
+          : "Draw";
 
   return (
     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 rounded-lg bg-background/85 p-6 backdrop-blur-sm">

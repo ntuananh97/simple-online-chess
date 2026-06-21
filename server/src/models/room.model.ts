@@ -163,6 +163,8 @@ export async function getRoomGameState(
     fen: room.fen,
     whiteId: room.whiteId,
     blackId: room.blackId,
+    whiteTime: room.whiteTime,
+    blackTime: room.blackTime,
     createdAt: room.createdAt,
   };
 }
@@ -170,13 +172,18 @@ export async function getRoomGameState(
 export async function updateRoomGameState(
   payload: Partial<RoomGameState>,
 ): Promise<RoomGameState> {
-  const { id, fen, status } = payload;
+  const { id, fen, status, whiteTime, blackTime } = payload;
   if (!id) {
     throw new JoinRoomError("Room ID is required", 400);
   }
 
-  if (!fen && !status) {
-    throw new JoinRoomError("FEN or status is required", 400);
+  if (
+    fen === undefined &&
+    status === undefined &&
+    whiteTime === undefined &&
+    blackTime === undefined
+  ) {
+    throw new JoinRoomError("FEN, status or time is required", 400);
   }
 
   const room = await prisma.room.findUnique({
@@ -189,7 +196,7 @@ export async function updateRoomGameState(
 
   const updated = await prisma.room.update({
     where: { id },
-    data: { fen, status },
+    data: { fen, status, whiteTime, blackTime },
   });
 
   return {
@@ -199,6 +206,8 @@ export async function updateRoomGameState(
     fen: updated.fen,
     whiteId: updated.whiteId,
     blackId: updated.blackId,
+    whiteTime: updated.whiteTime,
+    blackTime: updated.blackTime,
     createdAt: updated.createdAt,
   };
 }

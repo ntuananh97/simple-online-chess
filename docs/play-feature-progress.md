@@ -21,13 +21,14 @@ The play flow is split across **REST** (persist room data in PostgreSQL) and **W
 
 | Item | Status | Notes |
 |------|--------|-------|
-| `Room` model (Prisma) | Done | Single model with `roomCode`, `status`, `fen`, `whiteId`, `blackId`, timestamps |
+| `Room` model (Prisma) | Done | Single model with `roomCode`, `status`, `fen`, `whiteId`, `blackId`, `whiteTime`, `blackTime`, timestamps |
 | `RoomStatus` enum | Done | `WAITING`, `PLAYING`, `COMPLETED`, `ABANDONED` |
 | Initial migration | Done | `prisma/migrations/20260611093126_init_db/` |
 | Default FEN | Done | Standard starting position stored on room creation |
 | Neon + Prisma 7 setup | Done | Pooled `DATABASE_URL` for runtime, `DIRECT_URL` for CLI |
-| FEN updated after moves | Not done | DB `fen` is read on join only; in-memory state is authoritative during play |
-| `COMPLETED` status in DB | Not done | Client sets local status on `room:game-over`; server does not persist it yet |
+| Time control columns | Done | `whiteTime` and `blackTime` store remaining milliseconds; defaults are 10 minutes per side |
+| FEN updated after moves | Partial | DB `fen` is read on join and persisted only when a game completes or is abandoned; in-memory state is authoritative during play |
+| `COMPLETED` status in DB | Done | Server persists `COMPLETED`, final FEN, and final remaining time when checkmate, draw, or timeout ends a game |
 
 ---
 
@@ -71,18 +72,18 @@ Setup in `server/src/socket/index.ts`. Handlers in `server/src/socket/handlers/r
 |-------|--------|-------------|
 | `room:join` | Done | Payload `{ code, playerId }`. Validates membership, joins `room:{id}` channel, sets `playerColor`, optional ack `{ ok, room?, error? }`. |
 | `room:leave` | Done | Leaves the current room channel and notifies others. |
-| `room:move` | Done | Payload `{ move: { from, to, promotion? }, roomId }`. Validates turn and applies move via chess.js; broadcasts result or rejects. |
+| `room:move` | Done | Payload `{ move: { from, to, promotion? }, roomId }`. Validates turn, applies move via chess.js, updates server-side clock, and optionally acks `{ whiteTimeLeft, blackTimeLeft }`. |
 
 ### Server → Client events
 
 | Event | Status | Description |
 |-------|--------|-------------|
-| `room:state` | Done | Sent to the joining client: `{ id, code, status, fen, turn, whiteId, blackId }`. |
+| `room:state` | Done | Sent to the joining client: `{ id, code, status, fen, turn, whiteId, blackId, whiteTimeLeft, blackTimeLeft }`. |
 | `room:player-joined` | Done | Broadcast to others in the room when a player connects. |
 | `room:player-left` | Done | Broadcast when a player leaves or disconnects. |
-| `room:move-made` | Done | Broadcast to opponent(s): `{ from, to, promotion? }` after a valid move. |
+| `room:move-made` | Done | Broadcast to opponent(s): `{ from, to, promotion?, whiteTimeLeft, blackTimeLeft }` after a valid move. |
 | `room:move-rejected` | Done | Sent to the mover only: `{ fen, error }` — reverts client to authoritative position. |
-| `room:game-over` | Done | Broadcast to entire room: `{ winner: "white" \| "black" \| null, reason: "checkmate" \| "draw" }`. |
+| `room:game-over` | Done | Broadcast to entire room: `{ winner: "white" \| "black" \| null, reason: "checkmate" \| "draw" \| "timeout" }`. |
 | `room:error` | Defined only | Typed in `socket.types.ts`; no handler emits it yet. |
 
 ### Socket session data
@@ -104,25 +105,42 @@ Setup in `server/src/socket/index.ts`. Handlers in `server/src/socket/handlers/r
 | Game initialized check | Done | Rejects if no in-memory `Chess` instance exists |
 | Turn validation | Done | Rejects if `chess.turn()` !== `playerColor` ("Not your turn") |
 | Move application | Done | `chess.move(move)` via chess.js |
-| Opponent broadcast | Done | Emits `room:move-made` to others in the room (sender applies move optimistically) |
+| Time accounting | Done | Server subtracts elapsed time from the player who moved, sends remaining time in the move ack, and includes remaining time in `room:move-made` for the opponent |
+| Opponent broadcast | Done | Emits `room:move-made` with move and time data to others in the room (sender applies move optimistically) |
 | Invalid move | Done | Emits `room:move-rejected` with current FEN and error message |
-| Game-over detection | Done | On `chess.isGameOver()`: emits `room:game-over` to all sockets in the room |
+| Game-over detection | Done | On `chess.isGameOver()`: emits `room:game-over` to all sockets in the room and persists final FEN/time/status |
 | Checkmate winner | Done | Winner is the side that did **not** just move (`chess.turn()` after mate) |
 | Draw / other endings | Partial | Non-checkmate game-over sets `winner: null`, `reason: "draw"` (covers stalemate, etc.) |
+| Timeout game-over | Done | Server starts an in-memory timer for the side to move; when it expires, that side loses and final time is persisted |
 
 ---
 
 ## Server — In-Memory Game State
 
-`server/src/models/game.model.ts` uses **chess.js** to hold active game instances in a `Map<roomId, Chess>`.
+`server/src/models/game.model.ts` uses **chess.js** and in-memory timers to hold active game sessions in a `Map<roomId, GameSession>`.
 
 | Function | Status | Description |
 |----------|--------|-------------|
-| `getOrCreateGame(roomId, fen)` | Done | Used on `room:join` to load or create a `Chess` instance from DB FEN |
-| `getGame(roomId)` | Done | Used by `room:move` for validation and move application |
-| `removeGame(roomId)` | Done | Map cleanup (not yet called from handlers) |
+| `getOrCreateGame(roomId, gameSession)` | Done | Used on `room:join` to load or create a `GameSession` from DB FEN/time |
+| `getGame(roomId)` | Done | Used by `room:move` for validation, move application, and access to time control state |
+| `startClock(roomId)` | Done | Starts the game clock once the room is `PLAYING`; white is timed first because white moves first |
+| `applyMoveTime(roomId, playerColor)` | Done | Deducts elapsed time from the player who just moved and returns `{ whiteTimeLeft, blackTimeLeft }` |
+| `startGameTimer(roomId)` | Done | Clears the previous timer and schedules timeout for the current side to move |
+| `getTimeSnapshot(roomId)` | Done | Returns current remaining time, including live elapsed time for the side currently on clock |
+| `removeGame(roomId)` | Done | Clears game timer, clears grace timer, and removes the session from memory on game completion or abandonment |
 
-The RAM map is the fast path for game logic during an active session. The database `fen` field is loaded on join but not written back after moves.
+The RAM map is the fast path for game logic and clock state during an active session. The database `fen`, `whiteTime`, and `blackTime` fields are loaded on join but only written back when the game completes or is abandoned.
+
+### Server-side time control
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Initial clock start | Done | When a room becomes `PLAYING` and a socket joins, `lastMoveTime` is set to now and the first timer is scheduled for white |
+| Per-move time deduction | Done | After a valid move, server deducts elapsed time from the mover and schedules the next timer for the side to move |
+| Time sync payloads | Done | Mover receives remaining time via `room:move` ack; opponent receives it in `room:move-made` |
+| Timeout result | Done | If the current side's timer expires, the opponent wins with `reason: "timeout"` |
+| DB persistence policy | Done | Remaining time is kept in memory during play and persisted only on `COMPLETED` or `ABANDONED` |
+| GracePeriod interaction | Done | Clock continues during GracePeriod; timeout can end the game before the GracePeriod abandonment fires |
 
 ---
 
@@ -236,16 +254,15 @@ The following are planned or implied by the project goal but are **not** built y
 
 | Area | Notes |
 |------|-------|
-| FEN persistence on moves | Server does not write updated FEN to PostgreSQL after each move |
-| `COMPLETED` status in DB | Only updated in client state on `room:game-over` |
-| Abandon on disconnect | `ABANDONED` status exists in schema but is not set when players leave mid-game |
+| FEN persistence on each move | Server intentionally does not write updated FEN to PostgreSQL after each move; final FEN is persisted on completion/abandonment |
 | Random matchmaking | README describes pairing random opponents; current UX is manual create/join by code |
 | `room:error` broadcasts | Event type defined, not emitted |
-| `removeGame` cleanup | Helper exists, not wired to room lifecycle or game-over |
 | Reconnect / resync UX | Socket re-join works; no dedicated offline or reconnect UI |
 | Ack handling for `room:join` | Errors from join are not surfaced in the play page UI |
 | Promotion picker | Always promotes to queen (`"q"`) |
 | Move error toasts | `room:move-rejected` resyncs FEN silently (no user-facing message) |
+| Client time display | Server now sends remaining time, but the client UI has not been updated to render clocks |
+| Client timeout reason label | Server can emit `reason: "timeout"`, but client copy/types may still need to be updated to display it cleanly |
 | Server-side room status guard | `room:move` does not check DB `status === "PLAYING"` before accepting moves |
 
 ---
@@ -262,7 +279,7 @@ server/src/
 ├── models/game.model.ts
 ├── views/room.view.ts
 ├── types/room.types.ts
-├── types/socket.types.ts        # RoomMovePayload, IGameOverPayload, move events
+├── types/socket.types.ts        # RoomMovePayload, RoomMoveAck, IGameOverPayload, time-aware move events
 └── socket/
     ├── index.ts
     ├── types.ts
@@ -303,6 +320,6 @@ client/src/
 
 ## Summary
 
-**Done:** End-to-end room creation and joining (REST + redirect), anonymous player identity, Socket.IO room channels, real-time presence, interactive chess board (`ChessBoard` + `useChessBoard`), client-side move-intent boundary (`onMoveIntent`), online play orchestration in `useOnlineGame`, server-authoritative move validation (`room:move` / `room:move-made` / `room:move-rejected`), checkmate and draw game-over broadcast (`room:game-over`), and client game-over overlay with leave action.
+**Done:** End-to-end room creation and joining (REST + redirect), anonymous player identity, Socket.IO room channels, real-time presence, interactive chess board (`ChessBoard` + `useChessBoard`), client-side move-intent boundary (`onMoveIntent`), online play orchestration in `useOnlineGame`, server-authoritative move validation (`room:move` / `room:move-made` / `room:move-rejected`), server-side time control with timeout wins, final FEN/status/time persistence on completion or abandonment, checkmate/draw/timeout game-over broadcast (`room:game-over`), and client game-over overlay with leave action.
 
-**Next logical steps:** Persist FEN and `COMPLETED` status to the database, abandon flow on disconnect, `removeGame` cleanup, promotion UI, user-facing move-error feedback, and polish (ack errors, reconnect, matchmaking if desired).
+**Next logical steps:** Add client clock rendering and timeout labels, add a server-side `PLAYING` status guard for moves, polish reconnect/resync behavior, add promotion UI, user-facing move-error feedback, and matchmaking if desired.

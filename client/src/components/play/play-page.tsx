@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ChessBoard from "@/components/chessgame/chessgame";
+import { GameClock } from "@/components/chessgame/game-clock";
 import { GameOverDisplay } from "@/components/play/game-over-display";
 import { RoomStatusDisplay } from "@/components/play/room-status-display";
 import { useCheckToast } from "@/hooks/useCheckToast";
@@ -16,6 +17,7 @@ interface PlayPageProps {
 export function PlayPage({ roomCode }: PlayPageProps) {
   const {
     board,
+    clock,
     orientation,
     gameState,
     gameOver,
@@ -54,28 +56,36 @@ export function PlayPage({ roomCode }: PlayPageProps) {
         {!isLoading && gameState && (
           <>
             {gameState.status === "PLAYING" || gameOver ? (
-              <div className="relative w-full">
+              <div className="w-full">
                 {opponentDisconnected && !gameOver && (
                   <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
                     Đối thủ đã rời — đang chờ kết nối lại (tối đa 30 giây)
                   </div>
                 )}
-                <ChessBoard
-                  fen={board.fen}
+                <GameClock
+                  whiteTime={clock.whiteTime}
+                  blackTime={clock.blackTime}
+                  activeColor={clock.activeColor}
                   orientation={orientation}
-                  optionSquares={board.optionSquares}
-                  onPieceDrop={board.onPieceDrop}
-                  onSquareClick={board.onSquareClick}
                 />
-                {gameOver && (
-                  <GameOverDisplay
-                    payload={gameOver}
-                    userId={userId}
-                    whiteId={gameState.whiteId}
-                    blackId={gameState.blackId}
-                    onLeave={handleLeaveRoom}
+                <div className="relative mt-4">
+                  <ChessBoard
+                    fen={board.fen}
+                    orientation={orientation}
+                    optionSquares={board.optionSquares}
+                    onPieceDrop={board.onPieceDrop}
+                    onSquareClick={board.onSquareClick}
                   />
-                )}
+                  {gameOver && (
+                    <GameOverDisplay
+                      payload={gameOver}
+                      userId={userId}
+                      whiteId={gameState.whiteId}
+                      blackId={gameState.blackId}
+                      onLeave={handleLeaveRoom}
+                    />
+                  )}
+                </div>
               </div>
             ) : (
               <>

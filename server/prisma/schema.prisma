@@ -32,6 +32,8 @@ model Room {
   // và cho phép họ reconnect (F5 trang) mà không bị mất quyền điều khiển
   whiteId   String?
   blackId   String?
+  whiteTime Int @default(600000) // 10 minutes in milliseconds
+  blackTime Int @default(600000) // 10 minutes in milliseconds
 
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt

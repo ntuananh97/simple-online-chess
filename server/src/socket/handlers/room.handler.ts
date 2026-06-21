@@ -1,14 +1,24 @@
 import {
 
+  applyMoveTime,
+
   cancelGracePeriod,
 
   getGame,
+
+  getTimeSnapshot,
 
   getOrCreateGame,
 
   handleAbandonedRoom,
 
   isGracePeriodActive,
+
+  removeGame,
+
+  startClock,
+
+  startGameTimer,
 
   startGracePeriod,
 
@@ -26,7 +36,7 @@ import {
 
 } from "../../models/room.model";
 
-import { IGameOverPayload } from "../../types/socket.types";
+import type { IGameOverPayload } from "../../types/socket.types";
 
 import type { AppSocket } from "../types";
 
@@ -85,8 +95,21 @@ export function registerRoomHandlers(socket: AppSocket): void {
       cancelGracePeriod(room.id, playerId);
 
 
-
-      const chess = getOrCreateGame(room.id, room.fen);
+      const defaultGameSession = {
+        fen: room.fen,
+        timeControl: {
+          whiteTimeLeft: room.whiteTime,
+          blackTimeLeft: room.blackTime,
+          lastMoveTime: Date.now(),
+          started: false,
+        },
+      };
+      const roomGameSession = getOrCreateGame(room.id, defaultGameSession);
+      const chess = roomGameSession.chess;
+      const times =
+        room.status === "PLAYING" ? startClock(room.id) : getTimeSnapshot(room.id);
+        const whiteTimeLeft = times?.whiteTimeLeft ?? roomGameSession.timeControl.whiteTimeLeft;
+        const blackTimeLeft = times?.blackTimeLeft ?? roomGameSession.timeControl.blackTimeLeft;
 
 
 
@@ -105,6 +128,8 @@ export function registerRoomHandlers(socket: AppSocket): void {
         whiteId: room.whiteId,
 
         blackId: room.blackId,
+        whiteTimeLeft,
+        blackTimeLeft,
 
       });
 
@@ -115,7 +140,10 @@ export function registerRoomHandlers(socket: AppSocket): void {
         playerId,
 
         status: room.status,
-
+        time: {
+          whiteTimeLeft,
+          blackTimeLeft,
+        }
       });
 
 
@@ -174,7 +202,7 @@ export function registerRoomHandlers(socket: AppSocket): void {
 
 
 
-  socket.on("room:move", async (payload) => {
+  socket.on("room:move", async (payload, ack) => {
 
     const move = payload?.move;
 
@@ -190,6 +218,18 @@ export function registerRoomHandlers(socket: AppSocket): void {
 
     }
 
+    const roomGameSession = getGame(sessionRoomId);
+    if (!roomGameSession) {
+      emitMoveRejected({
+        socket,
+        fen: "",
+        error: "Game not initialized",
+      });
+      return;
+    }
+
+    const chess = roomGameSession.chess;
+
 
 
     if (roomId && roomId !== sessionRoomId) {
@@ -198,7 +238,7 @@ export function registerRoomHandlers(socket: AppSocket): void {
 
         socket,
 
-        fen: getGame(sessionRoomId)?.fen() ?? "",
+        fen: chess.fen(),
 
         error: "Room mismatch",
 
@@ -216,7 +256,7 @@ export function registerRoomHandlers(socket: AppSocket): void {
 
         socket,
 
-        fen: getGame(sessionRoomId)?.fen() ?? "",
+        fen: chess.fen(),
 
         error: "Opponent disconnected",
 
@@ -225,29 +265,6 @@ export function registerRoomHandlers(socket: AppSocket): void {
       return;
 
     }
-
-
-
-    const chess = getGame(sessionRoomId);
-
-
-
-    if (!chess) {
-
-      emitMoveRejected({
-
-        socket,
-
-        fen: "",
-
-        error: "Game not initialized",
-
-      });
-
-      return;
-
-    }
-
 
 
     if (chess.turn() !== playerColor) {
@@ -274,15 +291,32 @@ export function registerRoomHandlers(socket: AppSocket): void {
 
       if (result) {
 
-        socket.to(roomChannel(sessionRoomId)).emit("room:move-made", move);
+        const times = applyMoveTime(sessionRoomId, playerColor);
+
+        if (!times) {
+          emitMoveRejected({
+            socket,
+            fen: chess.fen(),
+            error: "Game not initialized",
+          });
+          return;
+        }
+
+        socket.to(roomChannel(sessionRoomId)).emit("room:move-made", {
+          ...move,
+          whiteTimeLeft: times.whiteTimeLeft,
+          blackTimeLeft: times.blackTimeLeft,
+        });
+
+        ack?.(times);
 
         const isGameOver = chess.isGameOver();
 
 
 
-        let winner = null;
+        let winner: IGameOverPayload["winner"] = null;
 
-        let reason = "draw";
+        let reason: IGameOverPayload["reason"] = "draw";
 
         if (chess.isCheckmate()) {
 
@@ -304,13 +338,25 @@ export function registerRoomHandlers(socket: AppSocket): void {
 
           } as IGameOverPayload);
 
-          updateRoomGameState({
+          await updateRoomGameState({
 
             id: sessionRoomId,
 
+            fen: chess.fen(),
+
             status: "COMPLETED",
 
+            whiteTime: times.whiteTimeLeft,
+
+            blackTime: times.blackTimeLeft,
+
           });
+
+          removeGame(sessionRoomId);
+
+        } else {
+
+          startGameTimer(sessionRoomId);
 
         }
 

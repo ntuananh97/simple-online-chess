@@ -1,3 +1,4 @@
+import { TimeSnapshot } from "../models/game.model";
 import type { RoomData } from "./room.types";
 
 export interface JoinRoomPayload {
@@ -14,6 +15,7 @@ export interface JoinRoomAck {
 export interface PlayerJoinedPayload {
   playerId: string;
   status: RoomData["status"];
+  time: TimeSnapshot;
 }
 
 export interface PlayerLeftPayload {
@@ -28,6 +30,8 @@ export interface RoomStatePayload {
   turn: "w" | "b";
   whiteId: string | null;
   blackId: string | null;
+  whiteTimeLeft: number;
+  blackTimeLeft: number;
 }
 
 interface IChessMove {
@@ -41,9 +45,13 @@ export interface RoomMovePayload {
   roomId: string;
 }
 
+export type RoomMoveAck = TimeSnapshot
+
+export type MoveMadePayload = IChessMove & TimeSnapshot;
+
 export interface IGameOverPayload {
   winner: "white" | "black" | null;
-  reason: "draw" | "checkmate" | "abandoned";
+  reason: "draw" | "checkmate" | "abandoned" | "timeout";
 }
 
 export interface RoomAbandonedPayload {
@@ -58,7 +66,10 @@ export interface ClientToServerEvents {
     ack?: (response: JoinRoomAck) => void,
   ) => void;
   "room:leave": () => void;
-  "room:move": (payload: RoomMovePayload) => void;
+  "room:move": (
+    payload: RoomMovePayload,
+    ack?: (response: RoomMoveAck) => void,
+  ) => void;
 }
 
 export interface ServerToClientEvents {
@@ -66,7 +77,7 @@ export interface ServerToClientEvents {
   "room:player-left": (payload: PlayerLeftPayload) => void;
   "room:state": (payload: RoomStatePayload) => void;
   "room:error": (payload: { message: string }) => void;
-  "room:move-made": (payload: IChessMove) => void;
+  "room:move-made": (payload: MoveMadePayload) => void;
   "room:move-rejected": (payload: { fen: string, error: string }) => void;
   "room:game-over": (payload: IGameOverPayload) => void;
   "room:abandoned": (payload: RoomAbandonedPayload) => void;
