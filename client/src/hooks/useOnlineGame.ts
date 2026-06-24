@@ -81,7 +81,7 @@ export function useOnlineGame(roomCode: string): UseOnlineGameReturn {
     policy: {
       interactive: gameState?.status === "PLAYING" && !gameOver,
       controllableColors: playerColor ? [playerColor] : [],
-      autoPromote: "q",
+      autoPromote: false,
     },
   });
   const activeColor = getTurnFromFen(board.fen);

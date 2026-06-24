@@ -75,6 +75,9 @@ export function PlayPage({ roomCode }: PlayPageProps) {
                     optionSquares={board.optionSquares}
                     onPieceDrop={board.onPieceDrop}
                     onSquareClick={board.onSquareClick}
+                    pendingPromotion={board.pendingPromotion}
+                    onPromotionSelect={board.confirmPromotion}
+                    onPromotionCancel={board.cancelPromotion}
                   />
                   {gameOver && (
                     <GameOverDisplay

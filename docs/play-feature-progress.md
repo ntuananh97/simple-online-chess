@@ -13,7 +13,7 @@ The play flow is split across **REST** (persist room data in PostgreSQL) and **W
 1. Player A creates a room via `POST /rooms` and is redirected to `/play/{code}`.
 2. Player B enters the room code on the home page, joins via `POST /rooms/join`, and is redirected to the same play URL.
 3. Both clients emit `room:join` over Socket.IO to subscribe to the room channel and receive live updates.
-4. Once status is `PLAYING`, the interactive chess board is shown. Moves are sent via `room:move`, validated server-side, and broadcast to the opponent. When the game ends, all clients receive `room:game-over`.
+4. Once status is `PLAYING`, the interactive chess board and player clocks are shown. Moves are sent via `room:move`, validated server-side, timed server-side, and broadcast to the opponent. When the game ends, all clients receive `room:game-over`.
 
 ---
 
@@ -79,7 +79,7 @@ Setup in `server/src/socket/index.ts`. Handlers in `server/src/socket/handlers/r
 | Event | Status | Description |
 |-------|--------|-------------|
 | `room:state` | Done | Sent to the joining client: `{ id, code, status, fen, turn, whiteId, blackId, whiteTimeLeft, blackTimeLeft }`. |
-| `room:player-joined` | Done | Broadcast to others in the room when a player connects. |
+| `room:player-joined` | Done | Broadcast to others in the room when a player connects; includes current time snapshot `{ whiteTimeLeft, blackTimeLeft }`. |
 | `room:player-left` | Done | Broadcast when a player leaves or disconnects. |
 | `room:move-made` | Done | Broadcast to opponent(s): `{ from, to, promotion?, whiteTimeLeft, blackTimeLeft }` after a valid move. |
 | `room:move-rejected` | Done | Sent to the mover only: `{ fen, error }` — reverts client to authoritative position. |
@@ -172,23 +172,43 @@ The RAM map is the fast path for game logic and clock state during an active ses
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| `PlayPage` component | Done | Thin view component for `/play/[roomCode]`; delegates online game orchestration to `useOnlineGame` |
-| `useOnlineGame` hook | Done | Mode-specific hook for online play; owns socket lifecycle, room state, game-over state, disconnect UI state, and board orchestration |
+| `PlayPage` component | Done | Thin view component for `/play/[roomCode]`; delegates online game orchestration to `useOnlineGame` and renders the board clock UI |
+| `useOnlineGame` hook | Done | Mode-specific hook for online play; owns socket lifecycle, room state, game-over state, disconnect UI state, board orchestration, and client clock synchronization |
 | Socket `room:join` on mount | Done | `useOnlineGame` emits with `roomCode` and local `playerId` |
 | Socket `room:leave` on unmount | Done | `useOnlineGame` cleans up when leaving the page |
-| Listen `room:state` | Done | `useOnlineGame` sets game state, calls `board.loadFen(data.fen)`, and ends loading |
-| Listen `room:player-joined` | Done | `useOnlineGame` updates room status and clears opponent-disconnected state |
-| Listen `room:move-made` | Done | `useOnlineGame` applies opponent move via `board.applyMove(move)` |
+| Listen `room:state` | Done | `useOnlineGame` sets game state, syncs clock from `whiteTimeLeft` / `blackTimeLeft`, calls `board.loadFen(data.fen)`, and ends loading |
+| Listen `room:player-joined` | Done | `useOnlineGame` updates room status, syncs clock from the server snapshot, and clears opponent-disconnected state |
+| Listen `room:move-made` | Done | `useOnlineGame` applies opponent move via `board.applyMove(move)` and syncs clock from the move payload |
 | Listen `room:move-rejected` | Done | `useOnlineGame` rolls back optimistic local state via `board.loadFen(fen)` |
 | Listen `room:game-over` | Done | `useOnlineGame` shows game-over overlay data and sets local status to `COMPLETED` |
 | Listen `room:abandoned` | Done | `useOnlineGame` loads abandoned FEN, sets local status to `ABANDONED`, and shows abandoned result |
 | Waiting UI | Done | `RoomStatusDisplay` + turn hint while status is not `PLAYING` |
 | Interactive board (PLAYING) | Done | `ChessBoard` component shown when `status === "PLAYING"` or after game over |
+| Client clock UI | Done | `GameClock` renders both player clocks above the board, ordered by board orientation, with active-player highlighting and low-time styling |
 | Board orientation | Done | Derived in `useOnlineGame` from player color (`whiteId` / `blackId` vs local `userId`) |
-| Move intent pipeline | Done | `useChessBoard` emits `onMoveIntent`; `useOnlineGame` applies optimistic move and emits `room:move` |
+| Move intent pipeline | Done | `useChessBoard` emits `onMoveIntent`; `useOnlineGame` applies optimistic move, emits `room:move`, and syncs clock from the ack |
 | `GameOverDisplay` overlay | Done | Win / lose / draw message with "Leave Room" button |
 | `handleLeaveRoom` | Done | Implemented in `useOnlineGame`; emits `room:leave` and navigates to home |
 | Ack handling for `room:join` | Not done | Join emit does not use the ack callback for error display |
+
+### `useGameClock` hook (`client/src/hooks/useGameClock.ts`)
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Client clock baseline | Done | Stores the latest server `TimeSnapshot` plus local sync timestamp |
+| Active side detection | Done | `getTurnFromFen(fen)` derives whose clock is running from the current board FEN |
+| Local ticking | Done | Updates display every 100ms while the game is running, decrementing only the active side |
+| Server sync boundary | Done | Exposes `syncTime(snapshot)` so `useOnlineGame` can resync on `room:state`, `room:player-joined`, move ack, and `room:move-made` |
+| Non-running state | Done | Stops ticking when the game is not `PLAYING` or after `gameOver` |
+
+### `GameClock` component (`client/src/components/chessgame/game-clock.tsx`)
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Clock formatting | Done | Formats milliseconds as `m:ss` with ceiling seconds and clamps negative values to zero |
+| Orientation-aware order | Done | Shows the opponent clock above and the local-side clock below based on board orientation |
+| Active clock styling | Done | Highlights the side whose turn is active |
+| Low-time styling | Done | Applies red time text below 60 seconds |
 
 ### `useChessBoard` hook (`client/src/hooks/useChessBoard.ts`)
 
@@ -203,7 +223,8 @@ The RAM map is the fast path for game logic and clock state during an active ses
 | External FEN sync | Done | Exposes `loadFen(fen)` for server state, rollback, reconnect, puzzle setup, or analysis positions |
 | Undo command | Done | Exposes `undo()` for future non-online modes such as analysis |
 | Check state | Done | Exposes `isInCheck`; UI side effects are handled outside the hook |
-| Auto-promotion policy | Done | `BoardPolicy.autoPromote` defaults online play to queen but can be disabled or changed later |
+| Promotion trigger | Done | Detects pawn promotion moves, stores `pendingPromotion`, and exposes `confirmPromotion(piece)` / `cancelPromotion()` for mode-specific UI |
+| Auto-promotion policy | Done | `BoardPolicy.autoPromote` supports automatic promotion for modes that want it; online play disables auto-promotion and uses the picker |
 | Interaction policy | Done | `BoardPolicy.interactive` and `BoardPolicy.controllableColors` gate interaction by mode and player color |
 
 ### `ChessBoard` component (`client/src/components/chessgame/chessgame.tsx`)
@@ -213,6 +234,15 @@ The RAM map is the fast path for game logic and clock state during an active ses
 | `react-chessboard` wrapper | Done | Renders `<Chessboard options={...} />` internally |
 | Semantic props | Done | Receives `fen`, `orientation`, `optionSquares`, and interaction handlers instead of exposing `ChessboardOptions` to pages |
 | Stable board id | Done | Uses an optional caller-provided `id` or a generated React `useId()` value |
+| Promotion picker integration | Done | Renders `PromotionPicker` as an overlay when `pendingPromotion` is provided |
+
+### `PromotionPicker` component (`client/src/components/chessgame/promotion-picker.tsx`)
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Promotion choices | Done | Lets the player choose queen, rook, bishop, or knight for pawn promotion |
+| Color-aware symbols | Done | Shows white or black piece symbols based on the promoting pawn color |
+| Cancel action | Done | Allows the player to close the picker and clear the pending promotion |
 
 ### `useCheckToast` hook (`client/src/hooks/useCheckToast.ts`)
 
@@ -224,8 +254,8 @@ The RAM map is the fast path for game logic and clock state during an active ses
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Result detection | Done | Compares `payload.winner` with `whiteId` / `blackId` and `userId` |
-| Win / lose / draw UI | Done | Icon, title, description, and reason label (Checkmate / Draw) |
+| Result detection | Done | Compares `payload.winner` with `whiteId` / `blackId` and `userId`; draw and abandoned reasons are handled separately |
+| Win / lose / draw / abandoned UI | Done | Icon, title, description, and reason label (Checkmate / Draw / Timeout / Abandoned) |
 | Leave action | Done | Overlay with backdrop blur; calls `onLeave` callback |
 
 ---
@@ -239,7 +269,7 @@ The RAM map is the fast path for game logic and clock state during an active ses
 | `getSocket` / `disconnectSocket` | Done | Typed Socket.IO singleton (`socket.io-client`) |
 | `SocketProvider` | Done | React context; auto-connects on mount |
 | `useListenEvent` | Done | Stable subscription hook for server events |
-| `socket.types.ts` | Done | Room, move, and game-over event payloads |
+| `socket.types.ts` | Done | Room, move, game-over, abandoned, and time snapshot event payloads |
 | `chess.types.ts` | Done | Shared `IChessMove`, `ChessColor`, `PromotionPiece`, and `BoardPolicy` types |
 | `room.types.ts` | Done | REST response and request types |
 | shadcn/ui (`Button`, `Input`, `Sonner`) | Done | Used on home and play pages |
@@ -259,10 +289,7 @@ The following are planned or implied by the project goal but are **not** built y
 | `room:error` broadcasts | Event type defined, not emitted |
 | Reconnect / resync UX | Socket re-join works; no dedicated offline or reconnect UI |
 | Ack handling for `room:join` | Errors from join are not surfaced in the play page UI |
-| Promotion picker | Always promotes to queen (`"q"`) |
 | Move error toasts | `room:move-rejected` resyncs FEN silently (no user-facing message) |
-| Client time display | Server now sends remaining time, but the client UI has not been updated to render clocks |
-| Client timeout reason label | Server can emit `reason: "timeout"`, but client copy/types may still need to be updated to display it cleanly |
 | Server-side room status guard | `room:move` does not check DB `status === "PLAYING"` before accepting moves |
 
 ---
@@ -296,6 +323,8 @@ client/src/
 │   └── play/[roomCode]/page.tsx
 ├── components/
 │   ├── chessgame/chessgame.tsx
+│   ├── chessgame/game-clock.tsx
+│   ├── chessgame/promotion-picker.tsx
 │   ├── home/home-actions.tsx
 │   ├── home/chess-board-decoration.tsx
 │   ├── play/play-page.tsx
@@ -304,6 +333,7 @@ client/src/
 ├── hooks/
 │   ├── useCheckToast.ts
 │   ├── useChessBoard.ts
+│   ├── useGameClock.ts
 │   ├── useListenEvent.ts
 │   └── useOnlineGame.ts
 ├── types/
@@ -320,6 +350,6 @@ client/src/
 
 ## Summary
 
-**Done:** End-to-end room creation and joining (REST + redirect), anonymous player identity, Socket.IO room channels, real-time presence, interactive chess board (`ChessBoard` + `useChessBoard`), client-side move-intent boundary (`onMoveIntent`), online play orchestration in `useOnlineGame`, server-authoritative move validation (`room:move` / `room:move-made` / `room:move-rejected`), server-side time control with timeout wins, final FEN/status/time persistence on completion or abandonment, checkmate/draw/timeout game-over broadcast (`room:game-over`), and client game-over overlay with leave action.
+**Done:** End-to-end room creation and joining (REST + redirect), anonymous player identity, Socket.IO room channels, real-time presence, interactive chess board (`ChessBoard` + `useChessBoard`), client-side move-intent boundary (`onMoveIntent`), promotion picker flow for online play, online play orchestration in `useOnlineGame`, client clock rendering and synchronization (`useGameClock` + `GameClock`), server-authoritative move validation (`room:move` / `room:move-made` / `room:move-rejected`), server-side time control with timeout wins, final FEN/status/time persistence on completion or abandonment, checkmate/draw/timeout game-over broadcast (`room:game-over`), and client game-over overlay with leave action.
 
-**Next logical steps:** Add client clock rendering and timeout labels, add a server-side `PLAYING` status guard for moves, polish reconnect/resync behavior, add promotion UI, user-facing move-error feedback, and matchmaking if desired.
+**Next logical steps:** Add a server-side `PLAYING` status guard for moves, polish reconnect/resync behavior, add user-facing move-error feedback, and matchmaking if desired.
