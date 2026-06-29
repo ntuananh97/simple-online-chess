@@ -20,14 +20,19 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
+RUN addgroup --system --gid 1001 nodejs \
+  && adduser --system --uid 1001 nodeapp
+
 COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma ./prisma
-RUN npm ci --omit=dev \
+RUN npm ci --omit=dev --ignore-scripts \
   && npm install --no-save prisma@7.8.0
 
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/src/generated ./src/generated
+COPY --from=builder --chown=nodeapp:nodejs /app/dist ./dist
+COPY --from=builder --chown=nodeapp:nodejs /app/src/generated ./src/generated
+
+USER nodeapp
 
 EXPOSE 5000
 
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/index.js"]
