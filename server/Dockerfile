@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY prisma.config.ts ./
 COPY prisma ./prisma
-RUN npm ci
+RUN DIRECT_URL=postgresql://placeholder npm ci
 
 FROM base AS builder
 WORKDIR /app
@@ -13,7 +13,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json tsconfig.json prisma.config.ts ./
 COPY prisma ./prisma
 COPY src ./src
-RUN npm run build
+RUN DIRECT_URL=postgresql://placeholder npm run build
 
 FROM base AS runner
 WORKDIR /app
